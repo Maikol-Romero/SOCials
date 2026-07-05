@@ -1,0 +1,32 @@
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# Real Patroni config (templated as patroni.yml.example)
+config/patroni.yml
+
+# Real pgbouncer userlist with SCRAM hashes
+config/userlist.txt
+
+# Backup snapshots / data
+snapshots/
+*.sql
+*.sql.gz
+*.dump
+
+# Inventory with real hostnames — replace with example
+inventory.json
+!inventory.json.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+docker-compose.yml.pre-*

@@ -1,0 +1,95 @@
+[Unit]
+Description=SocialWarden Agent — Secrets sync daemon
+Documentation=https://github.com/your-org/your-infra-ops
+After=network-online.target
+Wants=network-online.target
+# Start BEFORE docker.service so /run/secrets/*.env and merged symlinks exist
+# when Docker starts the containers that depend on them. If this is reversed,
+# containers with restart:unless-stopped will flap on reboot until the agent
+# catches up.
+Before=docker.service
+
+# Rate-limit restart loops (belongs in [Unit], not [Service], or systemd warns)
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Pre-start: ensure /run/secrets exists. It lives on tmpfs and is wiped
+# on every boot. Without this, ReadWritePaths=/run/secrets below fails to
+# bind-mount and the service crashloops with status=226/NAMESPACE.
+# Mode 0700: only root reads these files (Docker bind-mounts individual
+# files into containers; no container reads the dir listing).
+# `+` prefix runs ExecStartPre OUTSIDE the unit's namespace/sandbox — needed
+# so we can create dirs that ProtectSystem=strict + ReadWritePaths would
+# otherwise hide from the unit. Without `+`, the install command runs inside
+# a stripped namespace where mkdir+chmod on /tmp/node-exporter-textfile fails.
+ExecStartPre=+/usr/bin/install -d -m 700 /run/secrets
+# /tmp/node-exporter-textfile is referenced (with `-` prefix = optional) in
+# ReadWritePaths below. On hosts without node-exporter we still want to drop
+# the prometheus textfile here, so create it preemptively.
+ExecStartPre=+/usr/bin/install -d -m 755 /tmp/node-exporter-textfile
+# Bundle drop-zone for `socialwarden-manager bundle-push` (encrypted age files).
+ExecStartPre=+/usr/bin/install -d -m 700 /var/lib/socialwarden/bundles
+
+# Agent binary
+ExecStart=/usr/bin/python3 /opt/socialwarden-agent/socialwarden-agent.py /etc/socialwarden/config.yaml
+
+# Resilience: systemd creates these dirs on start, removes on stop.
+# Without these, a reboot on a machine with tmpfs /run clears /run/socialwarden
+# and the ReadWritePaths below fails to bind-mount, crashing the service in
+# a loop (status=226/NAMESPACE). With these, systemd guarantees they exist.
+#   - RuntimeDirectory → /run/socialwarden  (tmpfs, mode 0700, recreated each boot)
+#   - StateDirectory   → /var/lib/socialwarden  (persistent)
+#   - LogsDirectory    → /var/log/socialwarden  (persistent, for audit log)
+RuntimeDirectory=socialwarden
+RuntimeDirectoryMode=0700
+StateDirectory=socialwarden
+StateDirectoryMode=0700
+LogsDirectory=socialwarden
+LogsDirectoryMode=0700
+
+# Security hardening — baseline
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=no
+# /run/secrets is required for writing the per-collection env files.
+# /tmp/node-exporter-textfile is where we drop the Prometheus metrics file.
+# /run/socialwarden and /var/lib/socialwarden are created by RuntimeDirectory /
+# StateDirectory above; listing them in ReadWritePaths makes the intent
+# explicit and also works on older systemd that may not pre-create them.
+# Leading `-` on a path = "ignore if missing" (systemd doc). Needed for
+# /tmp/node-exporter-textfile because not every host has node-exporter
+# installed (dedicated agent boxes don't), and a missing path otherwise
+# causes namespace setup to fail with status=226/NAMESPACE before any
+# ExecStartPre can create it.
+ReadWritePaths=/run/secrets /run/socialwarden /var/lib/socialwarden /var/log/socialwarden -/tmp/node-exporter-textfile
+PrivateTmp=no
+
+# Security hardening — extra (v1.4.0)
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Note: MemoryDenyWriteExecute is NOT enabled because PyYAML's C accelerator
+# and cryptography wheels occasionally need RWX memory for their native code.
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging (stdout → journald → Promtail)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=socialwarden-agent
+
+# Environment
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=/root"
+
+[Install]
+WantedBy=multi-user.target

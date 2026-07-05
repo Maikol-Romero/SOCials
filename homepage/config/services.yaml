@@ -1,0 +1,56 @@
+# Service tiles for Homepage. Edit `href:` to point at your real domains.
+# Widgets that hit backend APIs use container hostnames (work via the shared
+# soc-monitor-net network).
+
+- Monitor (Observabilidad):
+    - Grafana:
+        icon: grafana.png
+        href: "https://grafana.example.com"
+        description: Dashboards, metricas y alertas
+        widget:
+          type: grafana
+          url: http://soc-grafana:3000
+          username: admin
+          password: "{{HOMEPAGE_VAR_GRAFANA_PASS}}"
+    - Prometheus:
+        icon: prometheus.png
+        href: "https://prometheus.example.com"
+        description: Base de datos de metricas
+        widget:
+          type: prometheus
+          url: http://soc-prometheus:9090
+    - Wazuh:
+        icon: wazuh.png
+        href: "https://wazuh.example.com"
+        description: Seguridad, intrusiones, FIM
+    - AdGuard:
+        icon: adguard-home.png
+        href: "https://adguard.example.com"
+        description: DNS interno
+    - Trivy:
+        icon: /images/trivy.png
+        href: "https://trivy.example.com"
+        description: Scanner de vulnerabilidades
+    - Loki:
+        icon: https://grafana.com/media/docs/loki/logo-grafana-loki.png
+        href: "https://grafana.example.com/explore?orgId=1&left=%7B%22datasource%22:%22loki%22%7D"
+        description: Logs centralizados
+    - Tempo:
+        icon: /images/tempo.png
+        href: "https://grafana.example.com/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22%7D"
+        description: Trazas distribuidas
+
+# Edit / replace the section below with your own internal apps.
+- Webs Internas:
+    - Panel Admin:
+        icon: si-react
+        href: https://panel.example.com
+        description: Internal admin dashboard
+    - Internal Wiki:
+        icon: /images/affine.png
+        href: https://internal.example.com
+        description: Knowledge base (Affine)
+    - Storybook:
+        icon: si-storybook
+        href: https://storybook.example.com
+        description: Component library

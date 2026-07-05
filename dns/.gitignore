@@ -1,0 +1,21 @@
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# AdGuard Home runtime state
+work/data/
+work/userfilters/
+*.db
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig

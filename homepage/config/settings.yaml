@@ -1,0 +1,15 @@
+title: SOC Homepage
+favicon: /images/favicon.png
+color: zinc
+headerStyle: clean
+statusStyle: dot
+hideVersion: true
+layout:
+  Monitor (Observabilidad):
+    style: column
+    columns: 3
+    header: true
+  Webs Internas:
+    style: column
+    columns: 3
+    header: true

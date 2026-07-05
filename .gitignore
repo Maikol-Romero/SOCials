@@ -1,0 +1,58 @@
+# SOCials top-level .gitignore — each component carries its own as well.
+
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# Runtime state / logs (any level)
+**/work/data/
+**/runtime/
+**/logs/
+*.log
+
+# Inventory / hostfiles with real fleet names
+inventory.json
+!inventory.json.example
+hosts.yml
+!hosts.yml.example
+
+# AdGuard DNS state
+dns/work/data/
+dns/work/userfilters/
+
+# BSBridge real services config
+betterstack-bridge/services.json
+!betterstack-bridge/services.example.json
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Generated documentation (build artifacts)
+*.docx
+socials_doc.js
+htb_thm_doc.js
+INDICE_DOCUMENTACION.txt
+normas_presentacion_trabajos.pdf
+HTB_THM_Guia_Docente.docx
+SOCials_Documentacion.docx
+SOCials_portada.html
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/

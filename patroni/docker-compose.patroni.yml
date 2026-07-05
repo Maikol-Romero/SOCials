@@ -1,0 +1,36 @@
+services:
+  patroni:
+    # Build with: docker build -t patroni-postgres:15.14.1 .
+    image: patroni-postgres:15.14.1
+    container_name: patroni-node
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /mnt/db/data:/var/lib/postgresql/data:Z
+      - ./config/patroni.yml:/etc/patroni/patroni.yml:ro
+    environment:
+      PATRONI_CONFIGURATION: /etc/patroni/patroni.yml
+    command: patroni /etc/patroni/patroni.yml
+    user: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: patroni-pgbouncer
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./config/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      patroni:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

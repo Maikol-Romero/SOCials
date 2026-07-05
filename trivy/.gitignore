@@ -1,0 +1,15 @@
+.env
+.htpasswd
+reports/scan_*.json
+reports/scan_*.txt
+reports/latest.json
+reports/history.json
+reports/resolved.json
+reports/summary.json
+reports/exposed.json
+reports/.image_meta.tmp
+inventory.json
+*.pyc
+__pycache__/
+*.swp
+.DS_Store

@@ -1,0 +1,26 @@
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# Real prometheus.yml has fleet topology — only ship the template
+prometheus/prometheus.yml
+!prometheus/prometheus.yml.example
+
+# Inventory with real hostnames — replace with example
+inventory.json
+!inventory.json.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+docker-compose.yml.bak
+prometheus/*.backup*
+prometheus/*.bak*

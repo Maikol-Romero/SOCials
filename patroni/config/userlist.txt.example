@@ -1,0 +1,13 @@
+# pgbouncer user → password mapping.
+# Format: "username" "SCRAM-SHA-256$..."
+#
+# Generate the SCRAM-SHA-256 hash for a user by running, inside the postgres
+# container:
+#   psql -U postgres -c "ALTER USER <name> WITH PASSWORD '<plaintext>';"
+#   psql -U postgres -tAc "SELECT rolname, rolpassword FROM pg_authid WHERE rolname = '<name>';"
+#
+# Then paste the hash into a copy of this file named userlist.txt.
+# Never commit userlist.txt — it contains password material.
+
+"postgres"        "SCRAM-SHA-256$4096$..."
+"replicator"      "SCRAM-SHA-256$4096$..."

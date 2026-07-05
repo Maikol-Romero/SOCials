@@ -1,0 +1,20 @@
+[
+  {
+    "name": "node-1",
+    "role": "primary",
+    "ip": "10.20.0.10",
+    "ssh": "ssh ubuntu@10.20.0.10"
+  },
+  {
+    "name": "node-2",
+    "role": "replica",
+    "ip": "10.20.0.11",
+    "ssh": "ssh ubuntu@10.20.0.11"
+  },
+  {
+    "name": "etcd-host",
+    "role": "dcs",
+    "ip": "10.20.0.1",
+    "ssh": "ssh ubuntu@10.20.0.1"
+  }
+]

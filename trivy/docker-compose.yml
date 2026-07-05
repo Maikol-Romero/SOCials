@@ -1,0 +1,20 @@
+# ============================================
+# Trivy — Scanner de Vulnerabilidades
+# ============================================
+# Escanea imágenes Docker y sistema operativo.
+# Se ejecuta vía cron, no corre permanentemente.
+
+services:
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: soc-trivy
+    volumes:
+      - trivy-cache:/root/.cache/
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./reports:/reports
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
+
+volumes:
+  trivy-cache:
+    name: soc-trivy-cache

@@ -1,0 +1,67 @@
+# ============================================
+# Grafana — Datasources Provisionados
+# ============================================
+# Se cargan automáticamente al iniciar Grafana.
+# Conectan Grafana con Prometheus, Loki y Tempo.
+# Las correlaciones permiten saltar entre métricas, logs y trazas.
+
+apiVersion: 1
+
+datasources:
+  # --- Prometheus (Métricas) ---
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: "15s"
+      exemplarTraceIdDestinations:
+        - name: traceID
+          datasourceUid: tempo
+
+  # --- Tempo (Trazas) ---
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      httpMethod: GET
+      # Correlación: De una traza, saltar a los logs de ese servicio en Loki
+      tracesToLogs:
+        datasourceUid: loki
+        filterByTraceID: true
+        filterBySpanID: true
+        mapTagNamesEnabled: true
+        mappedTags:
+          - key: service.name
+            value: service_name
+      # Correlación: De una traza, saltar a las métricas en Prometheus
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags:
+          - key: service.name
+            value: service_name
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+
+  # --- Loki (Logs) ---
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Correlación: De un log, saltar a la traza asociada en Tempo
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: "traceID=(\\w+)"
+          name: TraceID
+          url: "$${__value.raw}"

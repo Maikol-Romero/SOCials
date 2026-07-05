@@ -1,0 +1,20 @@
+[
+  {
+    "name": "manager-host",
+    "role": "manager",
+    "ip": "10.20.0.1",
+    "ssh": "ssh ubuntu@10.20.0.1"
+  },
+  {
+    "name": "host-1",
+    "role": "agent",
+    "ip": "10.20.0.10",
+    "ssh": "ssh ubuntu@10.20.0.10"
+  },
+  {
+    "name": "host-2",
+    "role": "agent",
+    "ip": "10.20.0.11",
+    "ssh": "ssh ubuntu@10.20.0.11"
+  }
+]

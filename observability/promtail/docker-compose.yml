@@ -1,0 +1,34 @@
+# ============================================
+# Promtail — Docker Log Collector
+# ============================================
+# Desplegar en cada máquina. Envía logs de Docker a Loki.
+#
+# Variables de entorno:
+#   LOKI_HOST: hostname/IP de Loki (default: localhost si Loki está en la misma máquina)
+#   HOSTNAME: nombre de la máquina (se usa como label en cada log shipped)
+
+services:
+  promtail:
+    image: grafana/promtail:3.6.10
+    container_name: soc-promtail
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail-config.yaml:/etc/promtail/config.yml:ro
+      - promtail-positions:/tmp
+    environment:
+      - LOKI_HOST=${LOKI_HOST:-localhost}
+      - HOSTNAME=${HOSTNAME}
+    command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+    networks:
+      - monitoring
+
+volumes:
+  promtail-positions:
+    name: soc-promtail-positions
+
+networks:
+  monitoring:
+    name: soc-monitor-net
+    external: true

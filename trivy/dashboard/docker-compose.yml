@@ -1,0 +1,45 @@
+services:
+  trivy-dashboard:
+    image: nginx:1.29-alpine
+    container_name: soc-trivy-dashboard
+    restart: unless-stopped
+    ports:
+      - "${MONITOR_IP:-127.0.0.1}:8086:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./docs.html:/usr/share/nginx/html/docs.html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./.htpasswd:/etc/nginx/.htpasswd:ro
+      - ../reports:/data/reports:ro
+    networks:
+      - soc-monitor-net
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=10m
+      - /var/run:size=1m
+      - /tmp:size=5m
+      - /var/log/nginx:size=10m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider --header="Host: localhost" http://127.0.0.1/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  soc-monitor-net:
+    external: true

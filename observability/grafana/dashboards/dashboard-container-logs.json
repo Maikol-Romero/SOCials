@@ -1,0 +1,766 @@
+{
+    "meta": {
+        "type": "db",
+        "canSave": true,
+        "canEdit": true,
+        "canAdmin": true,
+        "canStar": true,
+        "canDelete": true,
+        "slug": "container-logs",
+        "url": "/d/container-logs/container-logs",
+        "expires": "0001-01-01T00:00:00Z",
+        "created": "2026-03-18T14:38:21Z",
+        "updated": "2026-04-13T13:59:42Z",
+        "updatedBy": "admin",
+        "createdBy": "admin",
+        "version": 11,
+        "hasAcl": false,
+        "isFolder": false,
+        "apiVersion": "v0alpha1",
+        "folderId": 0,
+        "folderUid": "",
+        "folderTitle": "General",
+        "folderUrl": "",
+        "provisioned": false,
+        "provisionedExternalId": "",
+        "annotationsPermissions": {
+            "dashboard": {
+                "canAdd": true,
+                "canEdit": true,
+                "canDelete": true
+            },
+            "organization": {
+                "canAdd": true,
+                "canEdit": true,
+                "canDelete": true
+            }
+        }
+    },
+    "dashboard": {
+        "annotations": {
+            "list": [
+                {
+                    "builtIn": 1,
+                    "datasource": {
+                        "type": "grafana",
+                        "uid": "-- Grafana --"
+                    },
+                    "enable": true,
+                    "hide": true,
+                    "iconColor": "rgba(0, 211, 255, 1)",
+                    "name": "Annotations & Alerts",
+                    "type": "dashboard"
+                }
+            ]
+        },
+        "editable": true,
+        "fiscalYearStartMonth": 0,
+        "graphTooltip": 0,
+        "id": 3154807041355776,
+        "links": [
+            {
+                "icon": "dashboard",
+                "targetBlank": false,
+                "title": "SOC Estado General",
+                "type": "link",
+                "url": "/d/dffidv64tyltse"
+            }
+        ],
+        "panels": [
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Errores reales en contenedores de la aplicacion (excluye infraestructura SOC). Detecta logs con level=error/fatal y Tracebacks de Python. Si es 0, la app funciona bien.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 1
+                                },
+                                {
+                                    "color": "orange",
+                                    "value": 10
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 50
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 5,
+                    "w": 6,
+                    "x": 0,
+                    "y": 0
+                },
+                "id": 1,
+                "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "auto",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "sum(count_over_time({host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} | logfmt | json | level =~ \"(?i)error|fatal|crit\" [$__range])) + sum(count_over_time({host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} |= \"Traceback (most recent call last):\" [$__range]))",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Errores de app",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Errores en contenedores de monitoreo (Loki, Prometheus, Grafana, Promtail). Son normales en cantidades bajas. Solo preocupa si sube mucho de golpe.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 100
+                                },
+                                {
+                                    "color": "orange",
+                                    "value": 1000
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 5,
+                    "w": 5,
+                    "x": 6,
+                    "y": 0
+                },
+                "id": 2,
+                "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "auto",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "sum(count_over_time({host=~\"$host\", container=~\"soc-.*\"} | logfmt | json | level =~ \"(?i)error|fatal\" [$__range]))",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Errores de infra SOC",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Maquinas enviando logs a Loki. Si hay menos del esperado, Promtail se cayo en alguna maquina.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 4
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 5
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 5,
+                    "w": 5,
+                    "x": 11,
+                    "y": 0
+                },
+                "id": 3,
+                "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "auto",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "count(count by (host) (count_over_time({host=~\".+\"}[5m])))",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Maquinas activas",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Ranking de contenedores de la app con mas errores. Los de arriba necesitan atencion. Selecciona uno en el filtro para ver sus logs abajo.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 5
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 20
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 13,
+                    "w": 8,
+                    "x": 16,
+                    "y": 0
+                },
+                "id": 7,
+                "options": {
+                    "displayMode": "gradient",
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": false
+                    },
+                    "maxVizHeight": 300,
+                    "minVizHeight": 16,
+                    "minVizWidth": 8,
+                    "namePlacement": "auto",
+                    "orientation": "horizontal",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showUnfilled": true,
+                    "sizing": "auto",
+                    "valueMode": "color"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "topk(10, sum by (container) (count_over_time({host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} | logfmt | json | level =~ \"(?i)error|fatal|crit\" [$__range])))",
+                        "legendFormat": "{{container}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Top contenedores con errores",
+                "type": "bargauge"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Timeline de errores reales por contenedor (sin SOC). Un pico indica cuando empezo un problema. Si un contenedor aparece constantemente, tiene un bug o mala config.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 30,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "normal"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 16,
+                    "x": 0,
+                    "y": 5
+                },
+                "id": 6,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "mode": "multi",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "sum by (container) (count_over_time({host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} | logfmt | json | level =~ \"(?i)error|fatal|crit\" [5m]))",
+                        "legendFormat": "{{container}}",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "sum by (container) (count_over_time({host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} |= \"Traceback (most recent call last):\" [5m]))",
+                        "legendFormat": "{{container}} (python)",
+                        "refId": "B"
+                    }
+                ],
+                "title": "Errores de app en el tiempo",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Donde estan los errores de la app. Si una maquina concentra la mayoria, el problema esta localizado ahi.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            }
+                        },
+                        "mappings": []
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 13,
+                    "w": 8,
+                    "x": 0,
+                    "y": 13
+                },
+                "id": 4,
+                "options": {
+                    "legend": {
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "pieType": "pie",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "sort": "desc",
+                    "tooltip": {
+                        "hideZeros": false,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "sum by (host) (count_over_time({host=~\"$host\", container!~\"soc-.*\"} | logfmt | json | level =~ \"(?i)error|fatal\" [$__range]))",
+                        "legendFormat": "{{host}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Errores app por maquina",
+                "type": "piechart"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Cuantos logs genera cada maquina. Si una genera muchisimo mas que las demas, puede tener un contenedor en loop o muy verboso.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            }
+                        },
+                        "mappings": []
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 13,
+                    "w": 8,
+                    "x": 8,
+                    "y": 13
+                },
+                "id": 5,
+                "options": {
+                    "legend": {
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "pieType": "pie",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "sort": "desc",
+                    "tooltip": {
+                        "hideZeros": false,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "sum by (host) (count_over_time({host=~\"$host\"} [$__range]))",
+                        "legendFormat": "{{host}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Volumen total por maquina",
+                "type": "piechart"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Solo errores reales de la aplicacion: level=error/fatal y Tracebacks Python. Sin ruido de infraestructura SOC. Click en una linea para ver detalles. Click en 'Show context' para ver que paso antes y despues.",
+                "gridPos": {
+                    "h": 10,
+                    "w": 24,
+                    "x": 0,
+                    "y": 26
+                },
+                "id": 8,
+                "options": {
+                    "dedupStrategy": "exact",
+                    "enableInfiniteScrolling": false,
+                    "enableLogDetails": true,
+                    "showCommonLabels": false,
+                    "showControls": false,
+                    "showLabels": true,
+                    "showTime": true,
+                    "sortOrder": "Descending",
+                    "unwrappedColumns": false,
+                    "wrapLogMessage": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "{host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} | logfmt | json | level =~ \"(?i)error|fatal|crit\"",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "{host=~\"$host\", container=~\"$container\", container!~\"soc-.*\"} |= \"Traceback (most recent call last):\"",
+                        "refId": "B"
+                    }
+                ],
+                "title": "Últimos errores de la app ↓ (más recientes primero)",
+                "type": "logs"
+            },
+            {
+                "datasource": {
+                    "type": "loki",
+                    "uid": "loki"
+                },
+                "description": "Todos los logs del contenedor y maquina seleccionados. Usa 'Buscar texto' para buscar cualquier palabra (timeout, connection refused, un ID de petición). Util para investigar despues de ver un error arriba.",
+                "gridPos": {
+                    "h": 12,
+                    "w": 24,
+                    "x": 0,
+                    "y": 36
+                },
+                "id": 9,
+                "options": {
+                    "dedupStrategy": "none",
+                    "enableInfiniteScrolling": false,
+                    "enableLogDetails": true,
+                    "showCommonLabels": false,
+                    "showControls": false,
+                    "showLabels": true,
+                    "showTime": true,
+                    "sortOrder": "Ascending",
+                    "unwrappedColumns": false,
+                    "wrapLogMessage": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "type": "loki",
+                            "uid": "loki"
+                        },
+                        "expr": "{host=~\"$host\", container=~\"$container\"} |= `$search`",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Todos los logs — orden cronológico ↑ (usa los filtros de arriba)",
+                "type": "logs"
+            }
+        ],
+        "preload": false,
+        "refresh": "30s",
+        "schemaVersion": 42,
+        "tags": [
+            "soc",
+            "logs",
+            "docker"
+        ],
+        "templating": {
+            "list": [
+                {
+                    "current": {
+                        "text": "All",
+                        "value": "$__all"
+                    },
+                    "datasource": {
+                        "type": "loki",
+                        "uid": "loki"
+                    },
+                    "includeAll": true,
+                    "label": "Maquina",
+                    "name": "host",
+                    "options": [],
+                    "query": {
+                        "label": "host",
+                        "type": 1
+                    },
+                    "refresh": 2,
+                    "regexApplyTo": "value",
+                    "sort": 1,
+                    "type": "query"
+                },
+                {
+                    "current": {
+                        "text": "All",
+                        "value": "$__all"
+                    },
+                    "datasource": {
+                        "type": "loki",
+                        "uid": "loki"
+                    },
+                    "includeAll": true,
+                    "label": "Contenedor",
+                    "name": "container",
+                    "options": [],
+                    "query": {
+                        "label": "container",
+                        "type": 1
+                    },
+                    "refresh": 2,
+                    "regexApplyTo": "value",
+                    "sort": 1,
+                    "type": "query"
+                },
+                {
+                    "current": {
+                        "text": "",
+                        "value": ""
+                    },
+                    "label": "Buscar texto",
+                    "name": "search",
+                    "type": "textbox"
+                }
+            ]
+        },
+        "time": {
+            "from": "now-1h",
+            "to": "now"
+        },
+        "timepicker": {},
+        "timezone": "browser",
+        "title": "Container Logs",
+        "uid": "container-logs",
+        "version": 11,
+        "weekStart": ""
+    }
+}

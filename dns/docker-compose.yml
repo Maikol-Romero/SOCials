@@ -1,0 +1,12 @@
+services:
+  adguard:
+    image: adguard/adguardhome:latest
+    container_name: socials-adguard
+    volumes:
+      - ./work:/opt/adguardhome/work
+      - ./conf:/opt/adguardhome/conf
+    ports:
+      - "${MONITOR_IP}:${DNS_PORT:-53}:53/tcp"
+      - "${MONITOR_IP}:${DNS_PORT:-53}:53/udp"
+      - "${MONITOR_IP}:${DNS_WEB_PORT:-2999}:80/tcp"
+    restart: unless-stopped

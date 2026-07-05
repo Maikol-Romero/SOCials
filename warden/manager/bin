@@ -1,0 +1,2516 @@
+#!/usr/bin/env python3
+"""socialwarden-manager — orchestrator ("head") for the SocialWarden fleet.
+
+Runs ONLY on the manager host. Manages the fleet of socialwarden-agent
+clients across a private/VPN mesh network (e.g. Tailscale, WireGuard, or
+plain SSH over a private subnet). Uses inventory.json as the single source
+of truth.
+
+Subcommands:
+
+  list                           — show fleet state with socialwarden health
+  enroll-shamir <machine>        — bootstrap a machine with Shamir-split
+                                   master password. Distributes shares to
+                                   peers + utils + break-glass bundle.
+  recover <machine>              — recover a machine whose local share is
+                                   lost or corrupted. Needs 2 Shamir shares
+                                   entered interactively by trustees.
+  revoke <machine>               — rotate master + revoke all old shares
+                                   after a machine compromise.
+  rotate-shares                  — monthly share rotation for all machines
+                                   (same master, new shares). Safe to re-run.
+  shamir-split                   — CLI: split a secret stdin → K-of-N shares
+  shamir-combine                 — CLI: combine shares stdin → secret
+  status                         — manager-side readiness (identity keys,
+                                   store dir, tailscale reachability)
+  audit-tail [-n N]              — tail the manager audit log
+  help                           — this message
+
+Paths:
+  /opt/socialwarden-manager/       — installed code
+  /etc/socialwarden/manager.yaml   — manager config (share store location,
+                                   peer policy, trustee emails, etc.)
+  /var/lib/socialwarden-manager/   — persistent state (shares store, audit log)
+  /usr/local/bin/socialwarden-manager — this script (installed symlink)
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+
+# -----------------------------------------------------------------------------
+# Paths & constants
+# -----------------------------------------------------------------------------
+CODE_DIR     = "/opt/socialwarden-manager"
+CONFIG_PATH  = "/etc/socialwarden/manager.yaml"
+STATE_DIR        = Path("/var/lib/socialwarden-manager")
+SHARES_DIR       = STATE_DIR / "shares"        # per-machine shares this manager holds
+IDENTITY_DIR     = STATE_DIR / "identities"    # per-machine public keys (ed25519)
+AGE_PUBKEYS_DIR  = STATE_DIR / "age-pubkeys"   # per-machine age recipient pubkeys
+BUNDLES_DIR      = STATE_DIR / "bundles"       # cached encrypted bundles (per machine + name)
+AUDIT_LOG        = STATE_DIR / "audit.log"
+INVENTORY        = "/opt/your-infra-ops/inventory.json"
+
+# Pretty output
+RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"
+BLUE = "\033[0;34m"; CYAN = "\033[0;36m"; BOLD = "\033[1m"; DIM = "\033[2m"; NC = "\033[0m"
+
+def info(m):  print(f"{GREEN}[✓]{NC} {m}")
+def warn(m):  print(f"{YELLOW}[!]{NC} {m}")
+def err(m):   print(f"{RED}[✗]{NC} {m}", file=sys.stderr)
+def step(m):  print(f"\n{BLUE}=== {m} ==={NC}")
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+def require_root():
+    if os.geteuid() != 0:
+        err("This command must run as root. Try: sudo socialwarden-manager ...")
+        sys.exit(2)
+
+
+_MACHINE_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def validate_machine_name(name: str | None) -> None:
+    """Reject machine names that could break shell quoting or escape paths.
+
+    Defense in depth: the name flows into f-strings used in remote SSH/SCP
+    commands and into file paths under SHARES_DIR / peer-shares dirs. A
+    malicious name like "../../../etc/passwd" or "$(rm -rf /)" must not
+    reach those sites. Inventory edits or operator typos are the realistic
+    attack surface.
+    """
+    if name is None:
+        return  # not all subcommands take a machine arg
+    if not _MACHINE_NAME_RE.match(name):
+        err(f"Invalid machine name: {name!r}")
+        err("  Allowed characters: [a-zA-Z0-9._-]")
+        sys.exit(2)
+
+
+def ensure_state_dirs():
+    """Create /var/lib/socialwarden-manager/{shares,identities} as 0700 root."""
+    require_root()
+    for d in (STATE_DIR, SHARES_DIR, IDENTITY_DIR):
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
+
+
+def load_inventory() -> list[dict]:
+    try:
+        return json.load(open(INVENTORY))
+    except FileNotFoundError:
+        err(f"Inventory not found at {INVENTORY}. Run setup.sh first.")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        err(f"Inventory JSON invalid: {e}")
+        sys.exit(1)
+
+
+_INVENTORY_LOCK = str(INVENTORY) + ".lock"
+_inventory_lock_depth = 0
+
+
+@contextmanager
+def inventory_lock():
+    """Reentrant advisory file lock shared with machines.py (same path).
+
+    Reentrancy is process-local: nested calls within the same process do NOT
+    re-acquire fcntl, just increment a depth counter. This lets us wrap an
+    entire cmd_* body in main() and still allow save_inventory to re-call
+    inventory_lock without deadlocking.
+    """
+    global _inventory_lock_depth
+    if _inventory_lock_depth > 0:
+        _inventory_lock_depth += 1
+        try:
+            yield
+        finally:
+            _inventory_lock_depth -= 1
+        return
+    if not os.path.exists(_INVENTORY_LOCK):
+        try:
+            os.close(os.open(_INVENTORY_LOCK, os.O_WRONLY | os.O_CREAT, 0o644))
+        except PermissionError:
+            pass
+    fd = os.open(_INVENTORY_LOCK, os.O_RDONLY)
+    try:
+        deadline = time.time() + 30
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() > deadline:
+                    raise TimeoutError("inventory lock held by another process for >30s")
+                time.sleep(0.2)
+        _inventory_lock_depth = 1
+        yield
+    finally:
+        _inventory_lock_depth = 0
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
+def update_inventory(mutator):
+    """Atomic read-modify-write under inventory_lock — prevents lost updates."""
+    with inventory_lock():
+        machines = load_inventory()
+        result = mutator(machines)
+        if result is not None:
+            machines = result
+        pre_uid = pre_gid = None
+        if os.path.exists(INVENTORY):
+            st = os.stat(INVENTORY)
+            pre_uid, pre_gid = st.st_uid, st.st_gid
+        tmp = INVENTORY + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(machines, f, indent=2)
+        os.replace(tmp, INVENTORY)
+        if pre_uid is not None:
+            try:
+                os.chown(INVENTORY, pre_uid, pre_gid)
+            except PermissionError:
+                pass
+        try:
+            os.chmod(INVENTORY, 0o640)
+        except PermissionError:
+            pass
+
+
+def save_inventory(machines: list[dict]):
+    # Preserve owner/group + enforce mode 0640 + advisory lock.
+    with inventory_lock():
+        pre_uid = pre_gid = None
+        if os.path.exists(INVENTORY):
+            st = os.stat(INVENTORY)
+            pre_uid, pre_gid = st.st_uid, st.st_gid
+        tmp = INVENTORY + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(machines, f, indent=2)
+        os.replace(tmp, INVENTORY)
+        if pre_uid is not None:
+            try:
+                os.chown(INVENTORY, pre_uid, pre_gid)
+            except PermissionError:
+                pass
+        try:
+            os.chmod(INVENTORY, 0o640)
+        except PermissionError:
+            pass
+
+
+def find_machine(name: str, machines: list[dict] | None = None) -> dict | None:
+    if machines is None:
+        machines = load_inventory()
+    return next((m for m in machines if m["name"] == name), None)
+
+
+AUDIT_MAX_BYTES = 50 * 1024 * 1024   # 50 MB per file
+AUDIT_MAX_BACKUPS = 5                # audit.log.1 .. audit.log.5
+
+
+def _rotate_audit_log_if_needed():
+    """Rotate AUDIT_LOG if it exceeds AUDIT_MAX_BYTES.
+
+    audit.log → audit.log.1 → audit.log.2 → ... → audit.log.5 (oldest dropped).
+    Best-effort: any errors are swallowed (audit must not fail loudly).
+    """
+    base = str(AUDIT_LOG)
+    try:
+        if not AUDIT_LOG.exists() or AUDIT_LOG.stat().st_size < AUDIT_MAX_BYTES:
+            return
+        # Drop the oldest if present
+        oldest = Path(f"{base}.{AUDIT_MAX_BACKUPS}")
+        if oldest.exists():
+            oldest.unlink()
+        # Shift .{i} → .{i+1} for i = N-1 .. 1
+        for i in range(AUDIT_MAX_BACKUPS - 1, 0, -1):
+            src = Path(f"{base}.{i}")
+            if src.exists():
+                src.rename(f"{base}.{i + 1}")
+        # Current → .1
+        AUDIT_LOG.rename(f"{base}.1")
+    except OSError:
+        pass
+
+
+def audit(event: str, **kv):
+    """Append a JSON line to the manager audit log (rotated at 50 MB × 5)."""
+    ensure_state_dirs()
+    _rotate_audit_log_if_needed()
+    entry = {"ts": datetime.now(timezone.utc).isoformat(), "event": event}
+    entry.update(kv)
+    try:
+        fd = os.open(str(AUDIT_LOG), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, (json.dumps(entry) + "\n").encode())
+        finally:
+            os.close(fd)
+    except OSError as e:
+        err(f"audit write failed: {e}")
+
+
+def _ssh_extra_args() -> str:
+    """Build the common -o flags we always inject (host-key + root key fallback)."""
+    mgr_known_hosts = STATE_DIR / "known_hosts"
+    try:
+        mgr_known_hosts.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        mgr_known_hosts.touch(mode=0o600, exist_ok=True)
+    except OSError:
+        pass
+    extra = f"-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={mgr_known_hosts}"
+    if os.geteuid() == 0:
+        for candidate in (
+            "/home/ubuntu/.ssh/id_ed25519",
+            "/home/ubuntu/.ssh/id_rsa",
+            "/var/lib/socialwarden-manager/id_ed25519",
+        ):
+            if os.path.exists(candidate):
+                extra += f" -o IdentityFile={candidate} -o IdentitiesOnly=yes"
+                break
+    return extra
+
+
+def run_ssh(ssh_cmd: str, remote: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    """Run a short remote command. Wraps the command in single quotes.
+
+    NOTE: `remote` MUST NOT contain literal single quotes. For anything more
+    complex than a one-liner, use run_ssh_script() which pipes the script via
+    stdin and avoids quoting issues entirely.
+    """
+    parts = ssh_cmd.split(None, 1)
+    if len(parts) != 2 or parts[0] != "ssh":
+        raise ValueError(f"unexpected ssh_cmd format: {ssh_cmd!r}")
+    if "'" in remote:
+        raise ValueError(
+            f"run_ssh(): literal single quote in remote command — use run_ssh_script() instead"
+        )
+    injected = f"ssh {_ssh_extra_args()} {parts[1]}"
+    return subprocess.run(f"{injected} '{remote}'", shell=True,
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def run_ssh_script(ssh_cmd: str, script: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    """Run `script` on the remote via bash -s, passing it via ssh stdin.
+
+    Avoids ALL shell-in-shell quoting issues. Any characters (including
+    single quotes, backslashes, newlines) are safe in `script`.
+    """
+    parts = ssh_cmd.split(None, 1)
+    if len(parts) != 2 or parts[0] != "ssh":
+        raise ValueError(f"unexpected ssh_cmd format: {ssh_cmd!r}")
+    injected = f"ssh {_ssh_extra_args()} {parts[1]} sudo bash -s"
+    return subprocess.run(injected, shell=True, input=script,
+                          capture_output=True, text=True, timeout=timeout)
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: status
+# -----------------------------------------------------------------------------
+def cmd_status(_args):
+    print(f"{BOLD}=== SocialWarden Manager Status ==={NC}\n")
+
+    # Version
+    try:
+        v = (Path(CODE_DIR) / "VERSION").read_text().strip()
+    except FileNotFoundError:
+        v = "uninstalled (dev)"
+    print(f"  Version: {v}")
+
+    # Paths
+    for label, p in (("Code", CODE_DIR), ("Config", CONFIG_PATH), ("State", str(STATE_DIR))):
+        exists = os.path.exists(p)
+        icon = f"{GREEN}✓{NC}" if exists else f"{RED}✗{NC}"
+        print(f"  {label:<10} {icon} {p}")
+
+    # Shares store
+    shares_count = 0
+    if SHARES_DIR.exists():
+        try:
+            shares_count = len(list(SHARES_DIR.glob("*.share")))
+        except PermissionError:
+            shares_count = -1
+    identities_count = 0
+    if IDENTITY_DIR.exists():
+        try:
+            identities_count = len(list(IDENTITY_DIR.glob("*.pub")))
+        except PermissionError:
+            identities_count = -1
+    print(f"  Shares held for peers: {shares_count}")
+    print(f"  Peer public keys known: {identities_count}")
+
+    # Tailscale
+    try:
+        r = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            st = json.loads(r.stdout)
+            self_ip = st.get("Self", {}).get("TailscaleIPs", ["?"])[0]
+            print(f"  Tailscale: {GREEN}up{NC} ({self_ip})")
+        else:
+            print(f"  Tailscale: {YELLOW}not running{NC}")
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        print(f"  Tailscale: {YELLOW}unknown{NC}")
+
+    # Audit size
+    if AUDIT_LOG.exists():
+        try:
+            sz = AUDIT_LOG.stat().st_size
+            lines = sum(1 for _ in open(AUDIT_LOG))
+            print(f"  Audit log: {lines} events, {sz} bytes ({AUDIT_LOG})")
+        except PermissionError:
+            print(f"  Audit log: {YELLOW}unreadable{NC} (run with sudo)")
+    else:
+        print(f"  Audit log: empty")
+    print()
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: list
+# -----------------------------------------------------------------------------
+def cmd_list(_args):
+    """Show fleet machines with socialwarden state.
+
+    Pulls live health from each machine if reachable (tailscale + ssh).
+    Read-only; never modifies anything.
+    """
+    print(f"{BOLD}=== Fleet — socialwarden state ==={NC}\n")
+    machines = load_inventory()
+    print(f"{'name':<14} {'role':<12} {'socialwarden':<14} {'version':<8} {'enrolled_at':<22}")
+    print("-" * 75)
+    for m in sorted(machines, key=lambda x: (x.get("role", ""), x["name"])):
+        dw = m.get("socialwarden", {})
+        if dw.get("enrolled"):
+            status = f"{GREEN}enrolled{NC}"
+            ver = dw.get("version", "?")
+            when = dw.get("enrolled_at", "?")
+        elif m.get("role") == "monitor":
+            status = f"{CYAN}manager (self){NC}"
+            ver = "—"
+            when = "—"
+        else:
+            status = f"{YELLOW}not enrolled{NC}"
+            ver = "—"
+            when = "—"
+        role = m.get("role", "?")
+        # strip ANSI for alignment counting
+        status_plain = status
+        for ansi in (RED, GREEN, YELLOW, BLUE, CYAN, NC):
+            status_plain = status_plain.replace(ansi, "")
+        pad = 14 - len(status_plain)
+        print(f"{m['name']:<14} {role:<12} {status}{' ' * max(0, pad)} {ver:<8} {when:<22}")
+    print()
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: shamir-split
+# -----------------------------------------------------------------------------
+def cmd_shamir_split(args):
+    """CLI wrapper around shamir.py split. Reads secret from stdin."""
+    # Import locally so the module works even without shamir.py in dev
+    sys.path.insert(0, CODE_DIR)
+    try:
+        import shamir  # type: ignore
+    except ImportError:
+        # Fall back to the one alongside this script (dev mode)
+        sys.path.insert(0, str(Path(__file__).parent))
+        import shamir  # type: ignore
+
+    secret_bytes = sys.stdin.buffer.read()
+    if not secret_bytes:
+        err("Provide secret on stdin: echo -n 'password' | socialwarden-manager shamir-split --k 2 --n 3")
+        sys.exit(1)
+    secret_bytes = secret_bytes.rstrip(b"\n")
+    shares = shamir.split_bytes(secret_bytes, args.k, args.n)
+    print(f"# Shamir {args.k}-of-{args.n}, {len(secret_bytes)} bytes")
+    for x, y in shares:
+        print(shamir.fmt_share(x, y))
+    audit("shamir-split", k=args.k, n=args.n, secret_len=len(secret_bytes))
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: shamir-combine
+# -----------------------------------------------------------------------------
+def cmd_shamir_combine(args):
+    """Interactive combine. Reads shares from stdin (one per line), reconstructs,
+    prints to stdout.
+
+    With --k specified, REQUIRES at least k shares — prevents the foot-gun
+    where Lagrange interpolation with K-1 points yields plausible-looking
+    garbage that the operator might mistake for the real secret.
+    """
+    sys.path.insert(0, CODE_DIR)
+    try:
+        import shamir  # type: ignore
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import shamir  # type: ignore
+
+    print("Paste shares, one per line. Ctrl-D to finish.", file=sys.stderr)
+    shares = []
+    seen_x = set()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            sh = shamir.parse_share(line)
+        except ValueError:
+            err(f"skip malformed share: {line[:40]}")
+            continue
+        if sh[0] in seen_x:
+            err(f"skip duplicate share x={sh[0]}")
+            continue
+        seen_x.add(sh[0])
+        shares.append(sh)
+    if len(shares) < 2:
+        err("need at least 2 shares")
+        sys.exit(2)
+    if getattr(args, "k", None) is not None and len(shares) < args.k:
+        err(f"refusing to combine: got {len(shares)} share(s), --k requires at least {args.k}.")
+        err("Lagrange interpolation with fewer than K points produces garbage that")
+        err("looks plausible but is NOT the original secret. Provide more shares or")
+        err("re-run without --k to acknowledge.")
+        sys.exit(3)
+    if getattr(args, "k", None) is None and len(shares) < 3:
+        # Most users intend K=3 (default for our enroll-shamir). Warn loudly.
+        warn(f"got {len(shares)} share(s) without --k. If the original split used K>{len(shares)},")
+        warn("the output is mathematically plausible but WRONG. Pass --k <K> to enforce.")
+    secret = shamir.combine_bytes(shares)
+    try:
+        sys.stdout.write(secret.decode("utf-8") + "\n")
+    except UnicodeDecodeError:
+        sys.stdout.write(secret.hex() + "\n")
+    audit("shamir-combine", n_shares=len(shares), secret_len=len(secret))
+
+
+# -----------------------------------------------------------------------------
+# register-identity — fetch a machine's ed25519 pubkey via SSH and store it
+# -----------------------------------------------------------------------------
+def cmd_register_identity(args):
+    """SSH to <machine>, read /var/lib/socialwarden/identity.pub, store locally
+    at /var/lib/socialwarden-manager/identities/<name>.pub.
+
+    Also records the fingerprint in the audit log. Idempotent: re-registering
+    the same key is a no-op; a different key produces a warning and requires
+    --force to overwrite (protection against identity hijack).
+    """
+    import hashlib
+
+    ensure_state_dirs()
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"machine '{args.machine}' not in inventory")
+        sys.exit(1)
+    if target.get("role") == "monitor":
+        err(f"{args.machine} is the manager itself; no identity to fetch remotely")
+        sys.exit(1)
+
+    ssh_cmd = target["ssh"]
+    step(f"Fetching identity from {args.machine}")
+
+    r = run_ssh(ssh_cmd, "sudo cat /var/lib/socialwarden/identity.pub 2>/dev/null")
+    if r.returncode != 0 or not r.stdout.strip():
+        err(f"SSH or read failed: {r.stderr.strip() or 'empty output'}")
+        err("Is the agent v1.4.1+ running on this machine? It generates the key at startup.")
+        sys.exit(2)
+
+    pub_hex = r.stdout.strip()
+    try:
+        pub_raw = bytes.fromhex(pub_hex)
+    except ValueError:
+        err(f"fetched content is not hex: {pub_hex[:60]!r}")
+        sys.exit(3)
+    if len(pub_raw) != 32:
+        err(f"ed25519 pub must be 32 bytes, got {len(pub_raw)}")
+        sys.exit(3)
+
+    fp = hashlib.sha256(pub_raw).hexdigest()[:16]
+    store = IDENTITY_DIR / f"{args.machine}.pub"
+
+    if store.exists():
+        existing = store.read_text().strip()
+        if existing == pub_hex:
+            info(f"Already registered, identical key (fingerprint sha256:{fp})")
+            audit("register-identity-noop", machine=args.machine, fp=fp)
+            # Backfill inventory if a previous register-identity ran when the
+            # inventory schema didn't yet include identity_fingerprint, or if
+            # save_inventory was skipped (we used to early-return without
+            # updating inventory, which left the field unset on agent-host-dedicated and
+            # caused a peer to become ineligible as a Shamir peer holder).
+            for m in machines:
+                if m["name"] == args.machine:
+                    dw = m.setdefault("socialwarden", {})
+                    if dw.get("identity_fingerprint") != f"sha256:{fp}":
+                        dw["identity_fingerprint"] = f"sha256:{fp}"
+                        dw["identity_registered_at"] = datetime.now(timezone.utc).isoformat()
+                        save_inventory(machines)
+                        info(f"  inventory backfilled: identity_fingerprint = sha256:{fp}")
+                    break
+            return
+        if not args.force:
+            err(f"Key MISMATCH for {args.machine}:")
+            err(f"  stored fingerprint: sha256:{hashlib.sha256(bytes.fromhex(existing)).hexdigest()[:16]}")
+            err(f"  fetched fingerprint: sha256:{fp}")
+            err(f"This could mean the machine was re-provisioned OR its identity")
+            err(f"was compromised. Use --force to overwrite AFTER verifying with")
+            err(f"the machine operator out-of-band.")
+            audit("register-identity-mismatch", machine=args.machine, old_fp=hashlib.sha256(bytes.fromhex(existing)).hexdigest()[:16], new_fp=fp)
+            sys.exit(5)
+
+    # Atomic write: tmp + rename
+    tmp = str(store) + ".new"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    os.write(fd, (pub_hex + "\n").encode())
+    os.close(fd)
+    os.replace(tmp, store)
+    info(f"Registered {args.machine} → fingerprint sha256:{fp}")
+
+    # Also stamp the inventory so we can see "identity_registered: true"
+    for m in machines:
+        if m["name"] == args.machine:
+            dw = m.setdefault("socialwarden", {})
+            dw["identity_fingerprint"] = f"sha256:{fp}"
+            dw["identity_registered_at"] = datetime.now(timezone.utc).isoformat()
+            break
+    save_inventory(machines)
+    audit("register-identity", machine=args.machine, fp=fp, forced=args.force)
+
+
+def cmd_distribute_pubkeys(args):
+    """Push all registered ed25519 pubkeys to every enrolled machine.
+
+    Each peer will end up with /var/lib/socialwarden/peer-identities/<name>.pub
+    for every other peer, so its share-release HTTP endpoint can verify
+    signatures on incoming requests.
+
+    Idempotent: safe to re-run. Diffs before overwrite (skip if same).
+    """
+    import hashlib, tempfile
+
+    ensure_state_dirs()
+    machines = load_inventory()
+    id_files = sorted(IDENTITY_DIR.glob("*.pub"))
+    if not id_files:
+        err("No identities registered yet. Run register-identity first.")
+        sys.exit(1)
+
+    # Build a single payload: tarball of all pubkeys
+    # But simpler: iterate one file at a time via scp-like content push.
+    step(f"Distributing {len(id_files)} pubkeys to each enrolled peer")
+
+    targets = [m for m in machines if m.get("role") != "monitor"
+               and m.get("socialwarden", {}).get("enrolled")]
+    if not targets:
+        warn("No enrolled (non-monitor) machines to distribute to.")
+        return
+
+    failed = []
+    # Build ONE bash script per target that installs all pubkeys atomically.
+    # We pipe it via ssh stdin (run_ssh_script) to avoid all quoting issues.
+    for tgt in targets:
+        name = tgt["name"]
+        ssh_cmd = tgt["ssh"]
+        print(f"\n  → {name}")
+
+        # Generate the script. Each pubkey is written via heredoc (safe for
+        # any content since the hex is a closed character set).
+        lines = [
+            "set -e",
+            "install -d -m 755 -o root -g root /var/lib/socialwarden/peer-identities",
+        ]
+        for id_file in id_files:
+            peer_name = id_file.stem
+            pub_hex = id_file.read_text().strip()
+            target_path = f"/var/lib/socialwarden/peer-identities/{peer_name}.pub"
+            lines.append(f"cat > {target_path} <<'EOF_PUBKEY'")
+            lines.append(pub_hex)
+            lines.append("EOF_PUBKEY")
+            lines.append(f"chmod 644 {target_path}")
+        lines.append(f"echo PUSHED={len(id_files)}")
+        script = "\n".join(lines) + "\n"
+
+        r = run_ssh_script(ssh_cmd, script, timeout=30)
+        if r.returncode != 0:
+            err(f"    push failed: stderr={r.stderr.strip()[:200]}")
+            failed.append(name)
+            continue
+        if "PUSHED=" in r.stdout:
+            info(f"    {len(id_files)}/{len(id_files)} pubkeys pushed to {name}")
+            audit("distribute-pubkeys", target=name, pushed=len(id_files), total=len(id_files))
+        else:
+            err(f"    unexpected output: {r.stdout[:200]}")
+            failed.append(name)
+
+    if failed:
+        warn(f"Failed on: {', '.join(failed)}")
+        sys.exit(2)
+
+
+def cmd_list_identities(_args):
+    """Show all registered peer public keys with fingerprints."""
+    import hashlib
+    ensure_state_dirs()
+    store_files = sorted(IDENTITY_DIR.glob("*.pub"))
+    if not store_files:
+        warn("No identities registered yet.")
+        warn("Run: sudo socialwarden-manager register-identity <machine>")
+        return
+    print(f"{BOLD}Registered identities ({len(store_files)}){NC}\n")
+    print(f"  {'machine':<14}  {'fingerprint':<28}  {'registered_at'}")
+    print(f"  {'-'*14}  {'-'*28}  {'-'*24}")
+    machines = load_inventory()
+    for f in store_files:
+        name = f.stem
+        try:
+            pub_hex = f.read_text().strip()
+            pub_raw = bytes.fromhex(pub_hex)
+            fp = hashlib.sha256(pub_raw).hexdigest()[:16]
+        except (ValueError, OSError):
+            fp = "INVALID"
+        m = next((x for x in machines if x["name"] == name), {})
+        when = m.get("socialwarden", {}).get("identity_registered_at", "?")
+        print(f"  {name:<14}  sha256:{fp:<22}  {when}")
+    print()
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: enroll-shamir  (split master + distribute K-of-N shares)
+# -----------------------------------------------------------------------------
+# Flow (Phase 1 — operator-driven bootstrap, brownfield machines):
+#   1. Operator pipes the target's existing master password via stdin
+#      (one-time per machine; future greenfield enrollments will generate
+#      the master in the manager — Phase 4)
+#   2. Validate: target enrolled + identity registered + at least N-2 peers
+#      with identities available + manager has SSH to all of them
+#   3. Activate share-release HTTP endpoint on each selected peer (idempotent
+#      patch of /etc/socialwarden/config.yaml + restart, then GET /health
+#      verification on tailscale IP:14841)
+#   4. shamir.split_bytes → N shares, threshold K
+#   5. Distribute shares atomically:
+#        x=1            → target:/var/lib/socialwarden/local.share          (mode 600 root)
+#        x=2..N-1       → peer_i:/var/lib/socialwarden/peer-shares/<target>.share
+#        x=N            → manager:/var/lib/socialwarden-manager/shares/<target>.share
+#      Each step has a rollback hook in case a later step fails.
+#   6. Patch target /etc/socialwarden/config.yaml: shamir.{enabled,threshold,peers}
+#      + shamir.peers includes the N-2 peers' (name, tailscale ip)
+#   7. Restart socialwarden-agent on target; tail journal for the
+#      "Shamir: reconstructed master password" line OR confirm master.key
+#      cache is fresh (i.e. boot path 1, no reconstruction needed yet — that
+#      proves enrollment is wired up but lazy-validated until next reboot).
+#   8. Inventory stamp: socialwarden.shamir = {enabled, k, n, peers, enrolled_at}
+#   9. Audit log entry per share emitted + final outcome
+def _b64(b: bytes) -> str:
+    import base64
+    return base64.b64encode(b).decode()
+
+
+def _select_shamir_peers(target_name: str, machines: list[dict],
+                         requested: list[str] | None, k: int, n: int) -> list[dict]:
+    """Pick the N-2 peer machines that will hold a share for `target_name`.
+
+    Eligibility:
+      - Not the target itself
+      - Not the manager (manager holds its own share separately)
+      - socialwarden enrolled
+      - identity_fingerprint set in inventory (i.e. identity registered)
+      - has an `ip` field in inventory (tailscale IP, used for peer HTTP fetch)
+
+    If `requested` is given (operator override), validates each is eligible.
+    Otherwise auto-selects the first N-2 alphabetically.
+    """
+    needed = n - 2  # 1 share local + 1 share manager + (n-2) peers
+    eligible = []
+    for m in machines:
+        if m["name"] == target_name:
+            continue
+        if m.get("role") == "monitor":
+            continue
+        dw = m.get("socialwarden") or {}
+        if not dw.get("enrolled"):
+            continue
+        if not dw.get("identity_fingerprint"):
+            continue
+        if not m.get("ip"):
+            continue
+        eligible.append(m)
+    eligible.sort(key=lambda x: x["name"])
+
+    if requested:
+        by_name = {m["name"]: m for m in eligible}
+        chosen = []
+        for name in requested:
+            if name not in by_name:
+                err(f"Peer '{name}' not eligible (not enrolled, no identity, or not in inventory)")
+                sys.exit(2)
+            chosen.append(by_name[name])
+        if len(chosen) < needed:
+            err(f"Need {needed} peers (n={n}, k={k}); only got {len(chosen)} from --peers list")
+            sys.exit(2)
+        return chosen[:needed]
+
+    if len(eligible) < needed:
+        err(f"Not enough eligible peers: need {needed}, have {len(eligible)}")
+        err(f"Eligible: {[m['name'] for m in eligible]}")
+        sys.exit(2)
+    return eligible[:needed]
+
+
+def _peer_share_endpoint_ready(peer_ip: str, timeout_s: int = 5) -> bool:
+    """GET http://<ip>:14841/health and return True iff response is JSON ok=true."""
+    import urllib.request, urllib.error
+    url = f"http://{peer_ip}:14841/health"
+    try:
+        resp = urllib.request.urlopen(url, timeout=timeout_s).read().decode()
+        d = json.loads(resp)
+        return bool(d.get("ok"))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return False
+
+
+def _enable_share_release_on_peer(peer: dict) -> bool:
+    """Patch /etc/socialwarden/config.yaml on `peer` to set shamir.enabled=true,
+    restart the agent, then verify GET /health on its tailscale IP succeeds.
+
+    Idempotent: if endpoint already responds, returns True without restarting.
+    Returns True on success, False on any failure (caller decides what to do).
+    """
+    name = peer["name"]
+    peer_ip = peer["ip"]
+    if _peer_share_endpoint_ready(peer_ip):
+        info(f"  {name}: share-release endpoint already up at {peer_ip}:14841")
+        return True
+
+    step(f"Enable share-release on {name}")
+    # The agent's boot reconstruction logic uses shamir.peers (its own list),
+    # but here we only need to ensure shamir.enabled=true so the HTTP endpoint
+    # starts. We use Python (PyYAML available on every client) to patch the
+    # config in-place atomically.
+    script = (
+        "set -e\n"
+        "python3 - <<'PYEOF'\n"
+        "import yaml, os\n"
+        "p = '/etc/socialwarden/config.yaml'\n"
+        "with open(p) as f: c = yaml.safe_load(f) or {}\n"
+        "sh = c.setdefault('shamir', {})\n"
+        "if sh.get('enabled') is True:\n"
+        "    print('NOOP'); raise SystemExit(0)\n"
+        "sh['enabled'] = True\n"
+        "tmp = p + '.tmp'\n"
+        "with open(tmp, 'w') as f: yaml.safe_dump(c, f, default_flow_style=False)\n"
+        "os.chmod(tmp, 0o600)\n"
+        "os.replace(tmp, p)\n"
+        "print('PATCHED')\n"
+        "PYEOF\n"
+        "systemctl restart socialwarden-agent\n"
+    )
+    r = run_ssh_script(peer["ssh"], script, timeout=20)
+    if r.returncode != 0:
+        err(f"  {name}: enable failed: {r.stderr.strip() or r.stdout.strip()}")
+        return False
+
+    # Wait up to 45s for the endpoint to come up after restart. The initial
+    # sync (vault unlock + collection fetch) gates ShareReleaseServer.start(),
+    # and on machines with many collections that can take 15-30s.
+    for _ in range(45):
+        time.sleep(1)
+        if _peer_share_endpoint_ready(peer_ip):
+            info(f"  {name}: endpoint up at {peer_ip}:14841")
+            return True
+    err(f"  {name}: agent restarted but /health not responding within 45s")
+    return False
+
+
+def _scp_to(peer_ssh: str, local_path: str, remote_path: str, timeout: int = 30) -> bool:
+    """SCP a file to a remote path, then chown root + chmod 600 atomically.
+
+    Translates ssh -o KEY=VAL pairs verbatim, but converts ssh's `-p PORT`
+    to scp's `-P PORT` (different convention; -p in scp means preserve-mtime).
+    """
+    tokens = peer_ssh.split()
+    if tokens[0] != "ssh":
+        err(f"unexpected ssh cmd: {peer_ssh!r}")
+        return False
+    target_addr = tokens[-1]                 # user@host
+    scp_opts: list[str] = []
+    i = 1
+    while i < len(tokens) - 1:
+        tok = tokens[i]
+        if tok in ("-o", "-i"):
+            if i + 1 < len(tokens) - 1:
+                scp_opts.extend([tok, tokens[i + 1]])
+                i += 2
+                continue
+        elif tok == "-p":
+            if i + 1 < len(tokens) - 1:
+                scp_opts.extend(["-P", tokens[i + 1]])
+                i += 2
+                continue
+        i += 1
+    extra_opts = " ".join(scp_opts)
+    tmp_remote = f"/tmp/.swd-share-{int(time.time()*1000)}-{os.getpid()}"
+    cmd = (f"scp {_ssh_extra_args()} {extra_opts} {local_path} {target_addr}:{tmp_remote}")
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        err(f"  scp failed: {r.stderr.strip()}")
+        return False
+    move = (
+        "set -e\n"
+        f"install -d -m 700 -o root -g root {os.path.dirname(remote_path)}\n"
+        f"mv {tmp_remote} {remote_path}\n"
+        f"chown root:root {remote_path}\n"
+        f"chmod 600 {remote_path}\n"
+        f"echo OK\n"
+    )
+    r = run_ssh_script(peer_ssh, move, timeout=15)
+    if r.returncode != 0 or "OK" not in r.stdout:
+        err(f"  remote install failed: {r.stderr.strip() or r.stdout.strip()}")
+        return False
+    return True
+
+
+def _patch_target_shamir_config(target: dict, k: int, peers: list[dict]) -> bool:
+    """Patch /etc/socialwarden/config.yaml on the target machine:
+
+        shamir:
+          enabled: true
+          threshold: K
+          peers:
+            - {name: <peer_name>, ip: <tailscale_ip>}
+            ...
+          local_share_path: /var/lib/socialwarden/local.share
+
+    Atomic write via tmp + rename.
+    """
+    # Build the YAML fragment server-side (avoid quoting hell with embedded names/ips).
+    peers_json = json.dumps([{"name": p["name"], "ip": p["ip"]} for p in peers])
+    script = (
+        "set -e\n"
+        "python3 - <<PYEOF\n"
+        "import yaml, os, json\n"
+        "p = '/etc/socialwarden/config.yaml'\n"
+        "with open(p) as f: c = yaml.safe_load(f) or {}\n"
+        "c['shamir'] = {\n"
+        "    'enabled': True,\n"
+        f"    'threshold': {k},\n"
+        f"    'peers': json.loads({peers_json!r}),\n"
+        "    'local_share_path': '/var/lib/socialwarden/local.share',\n"
+        "    'boot_timeout_s': 300,\n"
+        "}\n"
+        "tmp = p + '.tmp'\n"
+        "with open(tmp, 'w') as f: yaml.safe_dump(c, f, default_flow_style=False, sort_keys=False)\n"
+        "os.chmod(tmp, 0o600)\n"
+        "os.replace(tmp, p)\n"
+        "print('PATCHED')\n"
+        "PYEOF\n"
+    )
+    r = run_ssh_script(target["ssh"], script, timeout=20)
+    if r.returncode != 0 or "PATCHED" not in r.stdout:
+        err(f"target config patch failed: {r.stderr.strip() or r.stdout.strip()}")
+        return False
+    return True
+
+
+def _verify_target_post_restart(target: dict) -> bool:
+    """Restart the target's socialwarden-agent and confirm it stays up.
+
+    We don't force a reconstruction here (the master.key cache should still
+    be valid, so boot path 1 takes over). What we DO verify:
+      - Service is `active (running)` after restart
+      - No CRITICAL log lines in last 30s
+      - `local.share` exists on disk with mode 600 root
+    Lazy validation: actual reconstruction is exercised on next clean reboot
+    or via `socialwarden-manager verify-shamir <machine>` (Phase 2 cron).
+    """
+    script = (
+        "set -e\n"
+        "systemctl restart socialwarden-agent\n"
+        "sleep 4\n"
+        "systemctl is-active --quiet socialwarden-agent && echo ACTIVE || { echo INACTIVE; exit 1; }\n"
+        "if journalctl -u socialwarden-agent --since '30s ago' --no-pager 2>/dev/null | grep -E 'CRITICAL|FATAL'; then\n"
+        "  echo HAS_CRITICAL; exit 2\n"
+        "fi\n"
+        "test -f /var/lib/socialwarden/local.share && echo HAS_LOCAL_SHARE || { echo NO_LOCAL_SHARE; exit 3; }\n"
+        "stat -c '%a %U' /var/lib/socialwarden/local.share\n"
+    )
+    r = run_ssh_script(target["ssh"], script, timeout=30)
+    if r.returncode != 0:
+        err(f"verify failed: {r.stdout.strip()}\n{r.stderr.strip()}")
+        return False
+    info(f"  target post-restart: {r.stdout.strip().splitlines()[-1]}")
+    return True
+
+
+def cmd_enroll_shamir(args):
+    """Enroll a brownfield machine into Shamir-split master backup.
+
+    Reads master password from stdin (one-time bootstrap). Splits K-of-N,
+    distributes shares to target / N-2 peers / manager. Patches target config,
+    restarts agent, marks inventory.
+
+    Defaults: K=3, N=5. Override with --k / --n.
+    """
+    require_root()
+    ensure_state_dirs()
+
+    # ---- 1. read master from stdin (PIN: must NOT be a tty interactively
+    #         echoing — operator should pipe it: `echo -n "$pw" | enroll-shamir m`
+    #         or `read -s pw; printf '%s' "$pw" | enroll-shamir m`).
+    if sys.stdin.isatty():
+        err("Master password must come from stdin (pipe). Example:")
+        err("  read -rsp 'master: ' pw && printf '%s' \"$pw\" | sudo socialwarden-manager enroll-shamir <machine>")
+        sys.exit(2)
+    master = sys.stdin.read()
+    # Strip a trailing newline (common with `echo`/`read` without -n) but
+    # preserve any embedded characters — passwords may contain spaces, etc.
+    if master.endswith("\n"):
+        master = master[:-1]
+    if not master:
+        err("Empty master password from stdin")
+        sys.exit(2)
+    if len(master) < 8:
+        err(f"Master too short ({len(master)} chars) — refusing to split")
+        sys.exit(2)
+    master_bytes = master.encode("utf-8")
+
+    # ---- 2. validate target & peers ----
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"Machine '{args.machine}' not found in inventory")
+        sys.exit(2)
+    if target.get("role") == "monitor":
+        err(f"{args.machine} is the manager itself — cannot Shamir-enroll the manager")
+        sys.exit(2)
+    tdw = target.get("socialwarden") or {}
+    if not tdw.get("enrolled"):
+        err(f"{args.machine} is not socialwarden-enrolled. Run socialwarden-enroll first.")
+        sys.exit(2)
+    if not tdw.get("identity_fingerprint"):
+        err(f"{args.machine} has no registered identity. Run register-identity first.")
+        sys.exit(2)
+    if tdw.get("shamir", {}).get("enabled") and not args.force:
+        err(f"{args.machine} already shamir-enrolled (k={tdw['shamir'].get('k')}, n={tdw['shamir'].get('n')}).")
+        err("Use --force to re-enroll (this REPLACES all existing shares — peers will get new shares,")
+        err("and the old break-glass share becomes useless. Confirm out-of-band before continuing.)")
+        sys.exit(2)
+
+    k = int(args.k)
+    n = int(args.n)
+    if not (2 <= k <= n <= 10):
+        err(f"K and N must satisfy 2 <= K <= N <= 10 (got K={k}, N={n})")
+        sys.exit(2)
+
+    requested = [s.strip() for s in args.peers.split(",")] if args.peers else None
+    peers = _select_shamir_peers(args.machine, machines, requested, k, n)
+
+    step(f"Shamir-enroll {args.machine} with K={k}, N={n}")
+    print(f"  Peers (will hold a share for {args.machine}):")
+    for p in peers:
+        print(f"    - {p['name']:<16} ip={p['ip']}")
+    print(f"  Plus: target local + manager local. Total holders: {len(peers) + 2}/{n}")
+
+    # ---- 3. activate share-release endpoint on each peer ----
+    step(f"Ensure share-release endpoint up on each peer")
+    for p in peers:
+        if not _enable_share_release_on_peer(p):
+            err(f"Aborting: peer {p['name']} could not start share-release endpoint.")
+            audit("enroll-shamir-abort", machine=args.machine, reason="peer_endpoint_down",
+                  peer=p["name"])
+            sys.exit(3)
+
+    # ---- DRY RUN STOP ----
+    if args.dry_run:
+        print()
+        info(f"{BOLD}--dry-run OK{NC}: prereqs validated, peer endpoints up, no shares distributed.")
+        print(f"  Re-run without --dry-run to actually enroll {args.machine}.")
+        audit("enroll-shamir-dryrun-ok", machine=args.machine, k=k, n=n,
+              peers=[p["name"] for p in peers])
+        return
+
+    # ---- 4. split master ----
+    import shamir  # type: ignore
+    shares = shamir.split_bytes(master_bytes, k, n)
+    if len(shares) != n:
+        err(f"shamir.split_bytes returned {len(shares)} shares, expected {n}")
+        sys.exit(4)
+    # zero out master in memory ASAP (best-effort; Python str/bytes immutable
+    # so this only nullifies our local refs — gc may keep copies, but we did
+    # what we could).
+    master = ""
+    master_bytes = b""
+
+    # Map shares to roles. shares is list[(x, y_bytes)], x starts at 1.
+    # x=1 → target local, x=2..N-1 → peer[i], x=N → manager.
+    target_share = shares[0]                 # x=1
+    peer_shares  = shares[1:n-1]             # x=2..N-1   (length = N-2)
+    mgr_share    = shares[n-1]               # x=N
+    if len(peer_shares) != len(peers):
+        err(f"BUG: peer_shares ({len(peer_shares)}) != peers ({len(peers)})")
+        sys.exit(4)
+
+    # ---- 5. distribute (atomic-ish: track what was deployed; rollback on err) ----
+    # Each step writes to a tmpfile then SCP+rename on the remote. Rollback
+    # removes any peer-shares we already pushed.
+    deployed_peers = []     # list of (peer_dict, remote_path) we successfully wrote
+    deployed_target = False
+    deployed_mgr = False
+    tmpdir = Path(f"/tmp/swd-shares-{int(time.time())}")
+    tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def rollback():
+        warn("Rolling back partial enrollment...")
+        for p, path in deployed_peers:
+            try:
+                run_ssh_script(p["ssh"], f"rm -f {path}", timeout=10)
+                info(f"  rolled back peer share on {p['name']}: {path}")
+            except Exception as e:
+                err(f"  rollback failed on {p['name']}: {e}")
+        if deployed_target:
+            try:
+                run_ssh_script(target["ssh"],
+                               "rm -f /var/lib/socialwarden/local.share", timeout=10)
+                info("  rolled back target local.share")
+            except Exception:
+                pass
+        if deployed_mgr:
+            try:
+                (SHARES_DIR / f"{args.machine}.share").unlink()
+                info(f"  rolled back manager share")
+            except FileNotFoundError:
+                pass
+        try:
+            for f in tmpdir.glob("*"):
+                f.unlink()
+            tmpdir.rmdir()
+        except OSError:
+            pass
+
+    try:
+        # 5a: write target's local share
+        step(f"Distribute share x={target_share[0]} → {args.machine} (local)")
+        local_tmp = tmpdir / f"target-{args.machine}.share"
+        local_tmp.write_text(shamir.fmt_share(*target_share) + "\n")
+        local_tmp.chmod(0o600)
+        if not _scp_to(target["ssh"], str(local_tmp),
+                       "/var/lib/socialwarden/local.share"):
+            raise RuntimeError("target local.share install failed")
+        deployed_target = True
+        info(f"  target:/var/lib/socialwarden/local.share installed")
+        audit("enroll-shamir-share", machine=args.machine,
+              role="target_local", x=target_share[0])
+
+        # 5b: write each peer's share
+        for i, (p, sh) in enumerate(zip(peers, peer_shares), start=2):
+            step(f"Distribute share x={sh[0]} → {p['name']} (peer holder)")
+            peer_tmp = tmpdir / f"peer-{p['name']}-{args.machine}.share"
+            peer_tmp.write_text(shamir.fmt_share(*sh) + "\n")
+            peer_tmp.chmod(0o600)
+            remote_path = f"/var/lib/socialwarden/peer-shares/{args.machine}.share"
+            if not _scp_to(p["ssh"], str(peer_tmp), remote_path):
+                raise RuntimeError(f"peer {p['name']} share install failed")
+            deployed_peers.append((p, remote_path))
+            info(f"  {p['name']}:{remote_path} installed")
+            audit("enroll-shamir-share", machine=args.machine,
+                  role="peer_holder", peer=p["name"], x=sh[0])
+
+        # 5c: write manager's share (local file on utils)
+        step(f"Distribute share x={mgr_share[0]} → manager (local store)")
+        mgr_path = SHARES_DIR / f"{args.machine}.share"
+        mgr_tmp = mgr_path.with_suffix(".share.new")
+        fd = os.open(str(mgr_tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.write(fd, (shamir.fmt_share(*mgr_share) + "\n").encode())
+        os.close(fd)
+        os.replace(mgr_tmp, mgr_path)
+        deployed_mgr = True
+        info(f"  manager:{mgr_path} installed")
+        audit("enroll-shamir-share", machine=args.machine,
+              role="manager_local", x=mgr_share[0])
+
+        # ---- 6. patch target config ----
+        step(f"Patch /etc/socialwarden/config.yaml on {args.machine}")
+        if not _patch_target_shamir_config(target, k, peers):
+            raise RuntimeError("target config patch failed")
+        info(f"  shamir.{{enabled,threshold={k},peers,local_share_path}} set")
+
+        # ---- 7. restart + verify ----
+        step(f"Restart socialwarden-agent on {args.machine} and verify")
+        if not _verify_target_post_restart(target):
+            raise RuntimeError("post-restart verify failed")
+
+        # ---- 8. inventory stamp ----
+        step("Update inventory")
+        for m in machines:
+            if m["name"] == args.machine:
+                m.setdefault("socialwarden", {})["shamir"] = {
+                    "enabled": True,
+                    "k": k,
+                    "n": n,
+                    "peers": [p["name"] for p in peers],
+                    "enrolled_at": datetime.now(timezone.utc).isoformat(),
+                }
+                break
+        save_inventory(machines)
+        info(f"  inventory marked: socialwarden.shamir.enabled = true")
+
+        # Store canary fingerprint so verify-shamir / break-glass-emit can
+        # validate the master without re-prompting. Best-effort: enroll already
+        # succeeded, so an error here only degrades the operator UX, doesn't
+        # break the deployment.
+        try:
+            canary_dir = STATE_DIR / "canaries"
+            canary_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            canary_path = canary_dir / f"{args.machine}.fp"
+            canary_tmp = canary_path.with_suffix(".fp.new")
+            fp = _canary_fp(master_bytes)
+            fd = os.open(str(canary_tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, (fp + "\n").encode())
+            finally:
+                os.close(fd)
+            os.replace(canary_tmp, canary_path)
+            info(f"  canary stored: sha256:{fp}")
+        except OSError as e:
+            warn(f"  canary store failed (non-fatal): {e}")
+
+        audit("enroll-shamir-ok", machine=args.machine, k=k, n=n,
+              peers=[p["name"] for p in peers],
+              fp=tdw.get("identity_fingerprint", ""))
+        # cleanup tmp shares (still mode 600, but no point keeping plaintext)
+        for f in tmpdir.glob("*"):
+            try: f.unlink()
+            except OSError: pass
+        try: tmpdir.rmdir()
+        except OSError: pass
+
+        print()
+        info(f"{BOLD}Shamir-enrolled {args.machine} successfully (K={k}/N={n}){NC}")
+        print(f"  Boot reconstruction: target uses local share + queries {len(peers)} peers via HTTP")
+        print(f"                       (any 2 of {len(peers)} peers responding = K={k} reached)")
+        print(f"  Recovery: manager share at {mgr_path} (root, 0600)")
+        print(f"  Verify next reboot or run: sudo socialwarden-manager verify-shamir {args.machine}")
+
+    except Exception as e:
+        err(f"Enrollment failed: {e}")
+        rollback()
+        audit("enroll-shamir-fail", machine=args.machine, error=str(e)[:200])
+        sys.exit(5)
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: recover  (rebuild master.key from peer shares + write to target)
+# -----------------------------------------------------------------------------
+# When to use:
+#   - Target's master.key cache corrupted/lost AND boot reconstruction failed
+#     (e.g. its local.share also lost, OR multiple peers down so HTTP fetch
+#     can't reach K shares).
+#   - Manual key recovery before re-rolling the master (#39).
+#
+# How it works:
+#   1. Validate target is shamir-enrolled
+#   2. Load manager's share from /var/lib/socialwarden-manager/shares/<target>.share
+#   3. For each peer named in inventory.socialwarden.shamir.peers, SSH+read
+#      /var/lib/socialwarden/peer-shares/<target>.share. Stop once we have K shares.
+#   4. shamir.combine_bytes -> master plaintext (kept in process memory only)
+#   5. SCP+install master.key to target as ENC: format (machine-id-bound)
+#   6. Restart target's socialwarden-agent, verify "Vault unlocked"
+#   7. master plaintext zeroed and dropped from process
+#
+# This DOES NOT re-split or re-distribute shares. Use rotate-shares (#38) or
+# revoke (#39) for that. Recovery is a "bring this machine back online" tool.
+def _read_peer_share_via_ssh(peer: dict, target_name: str) -> tuple | None:
+    """Read /var/lib/socialwarden/peer-shares/<target>.share on `peer` via SSH.
+    Returns (x, y_bytes) or None on any failure.
+    """
+    name = peer["name"]
+    remote_path = f"/var/lib/socialwarden/peer-shares/{target_name}.share"
+    r = run_ssh(peer["ssh"], f"sudo cat {remote_path}", timeout=15)
+    if r.returncode != 0:
+        warn(f"  {name}: cannot read share ({r.stderr.strip()[:100]})")
+        return None
+    content = r.stdout.strip()
+    if ":" not in content:
+        warn(f"  {name}: share malformed: {content[:40]!r}")
+        return None
+    try:
+        x_hex, y_hex = content.split(":", 1)
+        return (int(x_hex, 16), bytes.fromhex(y_hex))
+    except ValueError as e:
+        warn(f"  {name}: share parse error: {e}")
+        return None
+
+
+def _encrypt_master_for_target(target: dict, master_plain: str) -> str:
+    """Build ENC:<base64> ciphertext using target's machine-id.
+
+    Same scheme as agent's encrypt_credential():
+      key    = sha256("socialwarden-" + machine_id)
+      nonce  = 16 random bytes
+      stream = sha256(key + nonce) repeated to len(plaintext)
+      mac    = sha256(key + nonce + ciphertext)[:16]
+      output = "ENC:" + base64(nonce + mac + ciphertext)
+
+    Reads target's machine-id via SSH so the resulting blob can be decrypted
+    only on that target.
+    """
+    import hashlib, base64
+    r = run_ssh(target["ssh"], "sudo cat /etc/machine-id", timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError(f"cannot read /etc/machine-id on {target['name']}: {r.stderr.strip()}")
+    machine_id = r.stdout.strip()
+    if not machine_id or len(machine_id) < 16:
+        raise RuntimeError(f"unexpected machine-id from {target['name']}: {machine_id!r}")
+    key = hashlib.sha256(f"socialwarden-{machine_id}".encode()).digest()
+    nonce = os.urandom(16)
+    plaintext_bytes = master_plain.encode()
+    stream = hashlib.sha256(key + nonce).digest()
+    encrypted = bytes(a ^ b for a, b in zip(plaintext_bytes, stream * ((len(plaintext_bytes) // 32) + 1)))
+    mac = hashlib.sha256(key + nonce + encrypted).digest()[:16]
+    return "ENC:" + base64.b64encode(nonce + mac + encrypted).decode()
+
+
+def cmd_recover(args):
+    """Rebuild master.key on a target by combining manager share + K-1 peer shares.
+
+    Idempotent and non-destructive: the target's existing master.key is backed up
+    to /var/lib/socialwarden/master.key.recover-bak-<ts> before being overwritten.
+    """
+    require_root()
+    ensure_state_dirs()
+
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"Machine '{args.machine}' not found in inventory")
+        sys.exit(2)
+    if target.get("role") == "monitor":
+        err(f"{args.machine} is the manager — cannot recover the manager itself")
+        sys.exit(2)
+
+    sh = target.get("socialwarden", {}).get("shamir") or {}
+    if not sh.get("enabled"):
+        err(f"{args.machine} is not Shamir-enrolled. Nothing to recover from.")
+        err("Run: sudo socialwarden-manager enroll-shamir <machine>")
+        sys.exit(2)
+
+    k = int(sh.get("k", 3))
+    peer_names = sh.get("peers", [])
+
+    step(f"Recover master for {args.machine} (K={k}, peers in inventory: {peer_names})")
+
+    # 1. manager share
+    mgr_share_path = SHARES_DIR / f"{args.machine}.share"
+    if not mgr_share_path.exists():
+        err(f"Manager share not found at {mgr_share_path}")
+        err("This means enroll-shamir never wrote the manager share, or it was deleted.")
+        sys.exit(3)
+    mgr_content = mgr_share_path.read_text().strip()
+    if ":" not in mgr_content:
+        err(f"Manager share malformed: {mgr_content[:40]!r}")
+        sys.exit(3)
+    try:
+        mx_hex, my_hex = mgr_content.split(":", 1)
+        manager_share = (int(mx_hex, 16), bytes.fromhex(my_hex))
+    except ValueError as e:
+        err(f"Manager share parse error: {e}")
+        sys.exit(3)
+    info(f"  manager share loaded (x={manager_share[0]})")
+
+    # 2. peer shares (read via SSH until we have K total)
+    shares = [manager_share]
+    for peer_name in peer_names:
+        if len(shares) >= k:
+            break
+        peer = find_machine(peer_name, machines)
+        if not peer:
+            warn(f"  peer {peer_name} not in inventory, skipping")
+            continue
+        s = _read_peer_share_via_ssh(peer, args.machine)
+        if s is None:
+            continue
+        # Skip duplicates (in case manager's x coord matches a peer's by accident)
+        if any(s[0] == ex[0] for ex in shares):
+            warn(f"  {peer_name}: x={s[0]} duplicates an existing share, skipping")
+            continue
+        shares.append(s)
+        info(f"  {peer_name}: share loaded (x={s[0]})")
+
+    if len(shares) < k:
+        err(f"Only collected {len(shares)}/{k} shares — recovery impossible.")
+        err("Options:")
+        err("  - Bring more peers online and retry")
+        err("  - Use shamir-combine manually with break-glass share (when #41 ships)")
+        sys.exit(4)
+
+    # 3. combine
+    import shamir  # type: ignore
+    try:
+        master_bytes = shamir.combine_bytes(shares[:k])
+    except Exception as e:
+        err(f"shamir.combine_bytes failed: {e}")
+        sys.exit(5)
+    master = master_bytes.decode("utf-8", errors="replace")
+    info(f"  combined: {len(master)} chars master password reconstructed")
+
+    # 4. encrypt for target's machine-id
+    step(f"Encrypt master with {args.machine}'s machine-id")
+    try:
+        enc_blob = _encrypt_master_for_target(target, master)
+    except Exception as e:
+        err(f"encryption failed: {e}")
+        sys.exit(6)
+    finally:
+        # zero out plaintext refs (best-effort; Python str immutable)
+        master = ""
+        master_bytes = b""
+    info(f"  cipher size: {len(enc_blob)} bytes (ENC: prefix included)")
+
+    # 5. push to target with backup of existing
+    step(f"Install master.key on {args.machine} (with backup)")
+    ts = int(time.time())
+    push_script = (
+        "set -e\n"
+        f"if [ -f /var/lib/socialwarden/master.key ]; then\n"
+        f"  cp -p /var/lib/socialwarden/master.key /var/lib/socialwarden/master.key.recover-bak-{ts}\n"
+        f"  echo BACKUP=master.key.recover-bak-{ts}\n"
+        f"fi\n"
+        "install -d -m 700 -o root -g root /var/lib/socialwarden\n"
+        "umask 077\n"
+        f"cat > /var/lib/socialwarden/master.key.new << 'ENCEOF'\n"
+        f"{enc_blob}\n"
+        f"ENCEOF\n"
+        "chown root:root /var/lib/socialwarden/master.key.new\n"
+        "chmod 600 /var/lib/socialwarden/master.key.new\n"
+        "mv /var/lib/socialwarden/master.key.new /var/lib/socialwarden/master.key\n"
+        "stat -c '%a %U:%G %n' /var/lib/socialwarden/master.key\n"
+    )
+    r = run_ssh_script(target["ssh"], push_script, timeout=30)
+    if r.returncode != 0:
+        err(f"master.key install failed: {r.stderr.strip() or r.stdout.strip()}")
+        sys.exit(7)
+    for line in r.stdout.strip().splitlines():
+        info(f"  {line}")
+
+    # 6. restart target + verify
+    step(f"Restart socialwarden-agent on {args.machine}")
+    verify_script = (
+        "set -e\n"
+        "systemctl restart socialwarden-agent\n"
+        "for i in $(seq 1 30); do\n"
+        "  if journalctl -u socialwarden-agent --since '60s ago' --no-pager 2>/dev/null | grep -q 'Vault unlocked successfully'; then\n"
+        "    echo VAULT_UNLOCKED\n"
+        "    exit 0\n"
+        "  fi\n"
+        "  if journalctl -u socialwarden-agent --since '60s ago' --no-pager 2>/dev/null | grep -E 'CRITICAL|Login failure|wrong machine' >/dev/null; then\n"
+        "    echo VAULT_LOGIN_FAILED\n"
+        "    journalctl -u socialwarden-agent --since '60s ago' --no-pager | tail -10\n"
+        "    exit 1\n"
+        "  fi\n"
+        "  sleep 1\n"
+        "done\n"
+        "echo VAULT_TIMEOUT\n"
+        "journalctl -u socialwarden-agent --since '60s ago' --no-pager | tail -5\n"
+        "exit 2\n"
+    )
+    r = run_ssh_script(target["ssh"], verify_script, timeout=60)
+    if r.returncode != 0:
+        err(f"verify failed (exit {r.returncode}):")
+        err(r.stdout)
+        audit("recover-fail", machine=args.machine, exit_code=r.returncode,
+              shares_used=len(shares))
+        sys.exit(8)
+    info(f"  {r.stdout.strip().splitlines()[0]}")
+
+    audit("recover-ok", machine=args.machine, shares_used=k,
+          peers_consulted=peer_names)
+    print()
+    info(f"{BOLD}Recovered {args.machine} successfully{NC}")
+    print(f"  Backup of previous master.key on target: master.key.recover-bak-{ts}")
+    print(f"  Operator may delete that backup once stable: ssh {args.machine} 'sudo rm /var/lib/socialwarden/master.key.recover-bak-*'")
+
+
+def cmd_revoke(args):
+    """Revoke + rotate master after a suspected compromise.
+
+    Difference vs rotate-shares:
+      rotate-shares: same master, fresh shares (cron-friendly, hygiene)
+      revoke:        NEW master generated, set in Vaultwarden, fresh shares
+                     for new master, old shares INVALIDATED everywhere
+
+    Use after: a peer host was compromised, an operator left, a share leaked.
+
+    Flow:
+      1. Validate target enrolled, peers reachable
+      2. Read NEW master password from stdin (operator types fresh strong pw)
+      3. Reconstruct OLD master via shamir (sanity: confirm we still control it)
+      4. SSH to target: change Vaultwarden password (bw via target's session)
+         Operator does this STEP outside this tool today (Vault doesn't have
+         API for password change without current password) — we just collect
+         the new master and re-enroll Shamir with it.
+      5. Delete OLD shares everywhere (target local + peers + manager)
+      6. Re-enroll Shamir with NEW master (split + distribute)
+      7. Audit: revoke event with all peer names
+    """
+    require_root()
+    ensure_state_dirs()
+
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"Machine '{args.machine}' not found in inventory")
+        sys.exit(2)
+
+    sh_meta = target.get("socialwarden", {}).get("shamir") or {}
+    if not sh_meta.get("enabled"):
+        err(f"{args.machine} is not Shamir-enrolled. Use enroll-shamir first.")
+        sys.exit(2)
+
+    if sys.stdin.isatty():
+        err("New master password must come from stdin. Example:")
+        err("  read -rsp 'new master: ' p && printf '%s' \"$p\" | sudo socialwarden-manager revoke <machine>")
+        sys.exit(2)
+    new_master = sys.stdin.read()
+    if new_master.endswith("\n"):
+        new_master = new_master[:-1]
+    if not new_master or len(new_master) < 8:
+        err(f"Empty/short new master ({len(new_master)} chars) — refusing")
+        sys.exit(2)
+
+    print(f"\n{BOLD}{RED}REVOKE — destructive operation on {args.machine}{NC}")
+    print(f"  This will:")
+    print(f"    1. Confirm OLD master is reconstructible (sanity check)")
+    print(f"    2. Wipe OLD shares from target local + {sh_meta.get('peers', [])} + manager")
+    print(f"    3. Re-enroll with NEW master (K={sh_meta.get('k', 3)}, N={sh_meta.get('n', 5)})")
+    print(f"  {YELLOW}You must have ALREADY rotated the Vaultwarden master password{NC}")
+    print(f"  {YELLOW}via `bw login --raw` flow on the target — this tool only handles{NC}")
+    print(f"  {YELLOW}the Shamir distribution side.{NC}\n")
+
+    if not args.confirm:
+        err("Add --confirm to proceed (irreversible).")
+        sys.exit(2)
+
+    # 1. Sanity: can we still reconstruct OLD?
+    step("Sanity check: reconstruct OLD master")
+    k_old = int(sh_meta.get("k", 3))
+    old_shares = _read_full_share_set(args.machine, machines, sh_meta, k_old)
+    if old_shares is None:
+        err(f"Cannot reach K={k_old} shares of OLD master. Aborting before any destructive step.")
+        sys.exit(3)
+    import shamir  # type: ignore
+    try:
+        old_master_bytes = shamir.combine_bytes(old_shares)
+    except Exception as e:
+        err(f"Combine failed: {e}")
+        sys.exit(3)
+    info(f"  OLD master reconstructible ({len(old_master_bytes)} bytes), proceeding")
+    old_master_bytes = b""
+
+    # 2. Wipe OLD shares
+    step("Wipe OLD shares from all holders")
+    peer_names = sh_meta.get("peers", [])
+    wipe_failures = []
+    # 2a. target local
+    r = run_ssh_script(target["ssh"],
+                       "rm -f /var/lib/socialwarden/local.share && echo OK", timeout=10)
+    if "OK" in r.stdout:
+        info(f"  target:/var/lib/socialwarden/local.share removed")
+    else:
+        wipe_failures.append("target_local")
+    # 2b. peers
+    for pn in peer_names:
+        peer = find_machine(pn, machines)
+        if not peer:
+            continue
+        r = run_ssh_script(peer["ssh"],
+            f"rm -f /var/lib/socialwarden/peer-shares/{args.machine}.share && echo OK", timeout=10)
+        if "OK" in r.stdout:
+            info(f"  {pn}:/var/lib/socialwarden/peer-shares/{args.machine}.share removed")
+        else:
+            wipe_failures.append(pn)
+    # 2c. manager
+    mgr_path = SHARES_DIR / f"{args.machine}.share"
+    if mgr_path.exists():
+        mgr_path.unlink()
+        info(f"  manager:{mgr_path} removed")
+
+    if wipe_failures:
+        warn(f"Wipe partially failed: {wipe_failures}")
+        warn("OLD shares may still exist on those holders. Continuing with re-enroll, but")
+        warn("manually delete those shares ASAP.")
+
+    # 3. Re-enroll with NEW master (mirror enroll-shamir flow)
+    step("Re-enroll Shamir with NEW master")
+    new_master_bytes = new_master.encode()
+    new_master = ""
+
+    n = int(sh_meta.get("n", 5))
+    new_shares = shamir.split_bytes(new_master_bytes, k_old, n)
+    new_canary_fp = _canary_fp(new_master_bytes)
+    new_master_bytes = b""
+
+    target_share = new_shares[0]
+    peer_shares = new_shares[1:n - 1]
+    mgr_share = new_shares[n - 1]
+
+    tmpdir = Path(f"/tmp/swd-revoke-{int(time.time()*1000)}")
+    tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    try:
+        # 3a. target local
+        local_tmp = tmpdir / "target.share"
+        local_tmp.write_text(shamir.fmt_share(*target_share) + "\n")
+        local_tmp.chmod(0o600)
+        if not _scp_to(target["ssh"], str(local_tmp), "/var/lib/socialwarden/local.share"):
+            raise RuntimeError("target local install failed")
+        info(f"  target:/var/lib/socialwarden/local.share installed (NEW x={target_share[0]})")
+
+        # 3b. peers
+        for pn, sh in zip(peer_names, peer_shares):
+            peer = find_machine(pn, machines)
+            if not peer:
+                raise RuntimeError(f"peer {pn} disappeared mid-revoke")
+            peer_tmp = tmpdir / f"peer-{pn}.share"
+            peer_tmp.write_text(shamir.fmt_share(*sh) + "\n")
+            peer_tmp.chmod(0o600)
+            if not _scp_to(peer["ssh"], str(peer_tmp),
+                           f"/var/lib/socialwarden/peer-shares/{args.machine}.share"):
+                raise RuntimeError(f"peer {pn} install failed")
+            info(f"  {pn}:/var/lib/socialwarden/peer-shares/{args.machine}.share installed (NEW x={sh[0]})")
+
+        # 3c. manager
+        new_mgr = mgr_path.with_suffix(".share.new")
+        fd = os.open(str(new_mgr), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.write(fd, (shamir.fmt_share(*mgr_share) + "\n").encode())
+        os.close(fd)
+        os.replace(new_mgr, mgr_path)
+        info(f"  manager:{mgr_path} installed (NEW x={mgr_share[0]})")
+
+        # cleanup
+        for f in tmpdir.glob("*"):
+            try: f.unlink()
+            except OSError: pass
+        try: tmpdir.rmdir()
+        except OSError: pass
+
+        # 4. Refresh canary so verify-shamir / break-glass-emit see the NEW
+        #    master fingerprint. Best-effort: revoke already succeeded on disk.
+        try:
+            canary_dir = STATE_DIR / "canaries"
+            canary_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            canary_path = canary_dir / f"{args.machine}.fp"
+            canary_tmp = canary_path.with_suffix(".fp.new")
+            fd = os.open(str(canary_tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, (new_canary_fp + "\n").encode())
+            finally:
+                os.close(fd)
+            os.replace(canary_tmp, canary_path)
+            info(f"  canary refreshed: sha256:{new_canary_fp}")
+        except OSError as e:
+            warn(f"  canary refresh failed (non-fatal): {e}")
+
+        # 5. Inventory: bump revoked_at
+        for m in machines:
+            if m["name"] == args.machine:
+                m["socialwarden"]["shamir"]["last_revoked_at"] = datetime.now(timezone.utc).isoformat()
+                break
+        save_inventory(machines)
+
+        audit("revoke-ok", machine=args.machine, k=k_old, n=n,
+              peers=peer_names, wipe_failures=wipe_failures)
+        print()
+        info(f"{BOLD}{GREEN}Revoked + rotated master for {args.machine}{NC}")
+        print(f"  Next step on {args.machine} (operator):")
+        print(f"    sudo socialwarden-manager recover {args.machine}")
+        print(f"  to push the new master.key into the agent's cache and validate bw login.")
+
+    except Exception as e:
+        err(f"Re-enroll mid-revoke failed: {e}")
+        err(f"Target {args.machine} now has NEITHER old NOR complete new shares.")
+        err(f"Recovery: manually re-enroll with NEW master via:")
+        err(f"  echo -n '<new master>' | sudo socialwarden-manager enroll-shamir {args.machine} --force")
+        audit("revoke-fail", machine=args.machine, error=str(e)[:200])
+        sys.exit(5)
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: rotate-shares  (monthly: same master, fresh polynomial = fresh shares)
+# -----------------------------------------------------------------------------
+# Why: a stale Shamir share is just as valuable to an attacker as a fresh one
+# (it doesn't expire). Periodic rotation limits the blast radius of a single
+# share leak (e.g. attacker reads /var/lib/socialwarden/peer-shares/X.share on
+# one peer and the leaked value is invalidated within a month).
+#
+# Operation per machine:
+#   1. Reconstruct the current master from K shares (same as `recover` does
+#      internally, but no need to push back to target — the cache is valid).
+#   2. shamir.split_bytes with NEW coefficients → N new shares.
+#   3. Atomically replace ALL share holders (target local + peers + manager).
+#      If any step fails, rollback everything written so far on this machine
+#      so old shares remain authoritative.
+#   4. Audit: rotate-shares-ok / rotate-shares-fail per machine.
+#
+# This does NOT restart the agent — the target's master.key cache is unchanged,
+# so it keeps working. Only when the cache is later lost (reboot edge case)
+# will the agent need shares, and by then the new shares are in place.
+#
+# Cron-friendly:
+#   - returns exit 0 if all enrolled machines rotated OK
+#   - returns exit 1 if any machine failed (other machines still rotated)
+#   - --machine to limit to one (useful for ad-hoc / break-glass after revoke)
+#   - --dry-run for "what would change" (read-only)
+def _read_full_share_set(target_name: str, machines: list[dict],
+                         shamir_meta: dict, k: int) -> list[tuple] | None:
+    """Read K shares for `target_name` (manager + peers). Returns list of
+    (x, y) tuples or None if K shares cannot be assembled."""
+    shares = []
+
+    # 1. manager share
+    mgr_path = SHARES_DIR / f"{target_name}.share"
+    if mgr_path.exists():
+        content = mgr_path.read_text().strip()
+        if ":" in content:
+            try:
+                x_hex, y_hex = content.split(":", 1)
+                shares.append((int(x_hex, 16), bytes.fromhex(y_hex)))
+            except ValueError:
+                pass
+    if not shares:
+        warn(f"  {target_name}: manager share missing or malformed")
+        return None
+
+    # 2. peer shares
+    peer_names = shamir_meta.get("peers", [])
+    for peer_name in peer_names:
+        if len(shares) >= k:
+            break
+        peer = find_machine(peer_name, machines)
+        if not peer:
+            continue
+        s = _read_peer_share_via_ssh(peer, target_name)
+        if s is None:
+            continue
+        if any(s[0] == ex[0] for ex in shares):
+            continue
+        shares.append(s)
+
+    if len(shares) < k:
+        warn(f"  {target_name}: only {len(shares)}/{k} shares available — cannot rotate")
+        return None
+    return shares[:k]
+
+
+def _rotate_one_machine(target: dict, machines: list[dict], dry_run: bool) -> bool:
+    """Rotate shares for a single machine. Returns True on success.
+
+    Atomicity: tracks every share holder updated, rolls back on first failure.
+    """
+    name = target["name"]
+    shamir_meta = target.get("socialwarden", {}).get("shamir") or {}
+    if not shamir_meta.get("enabled"):
+        return True  # not enrolled — silent skip
+    k = int(shamir_meta.get("k", 3))
+    n = int(shamir_meta.get("n", 5))
+    peer_names = shamir_meta.get("peers", [])
+
+    step(f"Rotate {name} (K={k}, N={n}, peers={peer_names})")
+
+    # 1. Read existing shares + reconstruct master
+    shares = _read_full_share_set(name, machines, shamir_meta, k)
+    if shares is None:
+        err(f"  {name}: cannot reach K shares — skipping rotation")
+        return False
+
+    import shamir  # type: ignore
+    try:
+        master_bytes = shamir.combine_bytes(shares)
+    except Exception as e:
+        err(f"  {name}: combine failed: {e}")
+        return False
+    info(f"  reconstructed master ({len(master_bytes)} bytes) from {k} shares")
+
+    if dry_run:
+        info(f"  [dry-run] would re-split and redistribute {n} fresh shares")
+        return True
+
+    # 2. Re-split with fresh polynomial
+    try:
+        new_shares = shamir.split_bytes(master_bytes, k, n)
+    except Exception as e:
+        err(f"  {name}: re-split failed: {e}")
+        master_bytes = b""
+        return False
+    if len(new_shares) != n:
+        err(f"  {name}: split returned {len(new_shares)} shares, expected {n}")
+        master_bytes = b""
+        return False
+    master_bytes = b""  # zero out
+
+    # 3. Distribute new shares atomically. Layout (same as enroll-shamir):
+    #      x=1     → target local
+    #      x=2..N-1 → peers (in shamir_meta order)
+    #      x=N     → manager
+    target_share = new_shares[0]
+    peer_shares = new_shares[1:n - 1]
+    mgr_share = new_shares[n - 1]
+
+    if len(peer_shares) != len(peer_names):
+        err(f"  {name}: peer_shares ({len(peer_shares)}) != peer_names ({len(peer_names)})")
+        return False
+
+    tmpdir = Path(f"/tmp/swd-rotate-{int(time.time()*1000)}")
+    tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    # Track what we updated for rollback.
+    deployed: list[tuple] = []  # ("target"|"peer"|"manager", info, backup_content)
+
+    def rollback():
+        warn(f"  {name}: rolling back partial rotation...")
+        for kind, ctx, backup in deployed:
+            try:
+                if kind == "target":
+                    fd = os.open(str(tmpdir / "rb-target"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    os.write(fd, backup.encode())
+                    os.close(fd)
+                    _scp_to(target["ssh"], str(tmpdir / "rb-target"),
+                            "/var/lib/socialwarden/local.share")
+                elif kind == "peer":
+                    peer = ctx
+                    fd = os.open(str(tmpdir / f"rb-{peer['name']}"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    os.write(fd, backup.encode())
+                    os.close(fd)
+                    _scp_to(peer["ssh"], str(tmpdir / f"rb-{peer['name']}"),
+                            f"/var/lib/socialwarden/peer-shares/{name}.share")
+                elif kind == "manager":
+                    mgr_path = SHARES_DIR / f"{name}.share"
+                    fd = os.open(str(mgr_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    os.write(fd, backup.encode())
+                    os.close(fd)
+                info(f"    restored {kind} share")
+            except Exception as e:
+                err(f"    rollback failed for {kind}: {e}")
+
+    try:
+        # 3a. target local
+        r = run_ssh(target["ssh"], "sudo cat /var/lib/socialwarden/local.share", timeout=10)
+        if r.returncode != 0:
+            err(f"  {name}: cannot read existing local.share for backup")
+            raise RuntimeError("backup read failed")
+        backup = r.stdout.strip()
+        local_tmp = tmpdir / f"target-{name}.share"
+        local_tmp.write_text(shamir.fmt_share(*target_share) + "\n")
+        local_tmp.chmod(0o600)
+        if not _scp_to(target["ssh"], str(local_tmp),
+                       "/var/lib/socialwarden/local.share"):
+            raise RuntimeError("target local install failed")
+        deployed.append(("target", target, backup))
+        info(f"  target:/var/lib/socialwarden/local.share rotated (x={target_share[0]})")
+
+        # 3b. peer shares
+        for i, (peer_name, sh) in enumerate(zip(peer_names, peer_shares)):
+            peer = find_machine(peer_name, machines)
+            if not peer:
+                raise RuntimeError(f"peer {peer_name} not in inventory")
+            r = run_ssh(peer["ssh"],
+                        f"sudo cat /var/lib/socialwarden/peer-shares/{name}.share",
+                        timeout=10)
+            if r.returncode != 0:
+                err(f"  cannot read existing peer-share on {peer_name} for backup")
+                raise RuntimeError("peer backup read failed")
+            backup = r.stdout.strip()
+            peer_tmp = tmpdir / f"peer-{peer_name}-{name}.share"
+            peer_tmp.write_text(shamir.fmt_share(*sh) + "\n")
+            peer_tmp.chmod(0o600)
+            remote_path = f"/var/lib/socialwarden/peer-shares/{name}.share"
+            if not _scp_to(peer["ssh"], str(peer_tmp), remote_path):
+                raise RuntimeError(f"peer {peer_name} install failed")
+            deployed.append(("peer", peer, backup))
+            info(f"  {peer_name}:{remote_path} rotated (x={sh[0]})")
+
+        # 3c. manager share
+        mgr_path = SHARES_DIR / f"{name}.share"
+        backup = mgr_path.read_text() if mgr_path.exists() else ""
+        new_mgr = mgr_path.with_suffix(".share.new")
+        fd = os.open(str(new_mgr), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.write(fd, (shamir.fmt_share(*mgr_share) + "\n").encode())
+        os.close(fd)
+        os.replace(new_mgr, mgr_path)
+        deployed.append(("manager", None, backup))
+        info(f"  manager:{mgr_path} rotated (x={mgr_share[0]})")
+
+        # cleanup tmp + record audit
+        for f in tmpdir.glob("*"):
+            try: f.unlink()
+            except OSError: pass
+        try: tmpdir.rmdir()
+        except OSError: pass
+
+        # Inventory: stamp last_rotated_at (don't change peers/k/n)
+        for m in machines:
+            if m["name"] == name:
+                m["socialwarden"]["shamir"]["last_rotated_at"] = datetime.now(timezone.utc).isoformat()
+                break
+        save_inventory(machines)
+
+        audit("rotate-shares-ok", machine=name, k=k, n=n,
+              peers=peer_names, shares_consulted=k)
+        info(f"  {GREEN}{BOLD}rotated {name} OK{NC}")
+        return True
+
+    except Exception as e:
+        err(f"  {name}: rotation failed mid-flight: {e}")
+        rollback()
+        audit("rotate-shares-fail", machine=name, error=str(e)[:200])
+        return False
+
+
+def cmd_rotate_shares(args):
+    """Rotate shares for all (or one) Shamir-enrolled machines.
+
+    Cron usage (monthly):
+      0 4 1 * *  root  /usr/local/bin/socialwarden-manager rotate-shares >> /var/log/socialwarden-rotate.log 2>&1
+    """
+    require_root()
+    ensure_state_dirs()
+    machines = load_inventory()
+
+    if args.machine:
+        targets = [m for m in machines if m["name"] == args.machine]
+        if not targets:
+            err(f"Machine '{args.machine}' not in inventory")
+            sys.exit(2)
+    else:
+        targets = [m for m in machines
+                   if (m.get("socialwarden", {}).get("shamir") or {}).get("enabled")]
+
+    if not targets:
+        warn("No Shamir-enrolled machines to rotate.")
+        return
+
+    print(f"\n{BOLD}Rotating Shamir shares for {len(targets)} machine(s){NC}")
+    if args.dry_run:
+        print(f"  {DIM}(dry-run: read existing shares, reconstruct, but do not write){NC}")
+
+    ok_count = 0
+    fail_count = 0
+    for tgt in targets:
+        if _rotate_one_machine(tgt, machines, args.dry_run):
+            ok_count += 1
+        else:
+            fail_count += 1
+
+    print()
+    if fail_count == 0:
+        info(f"{BOLD}rotate-shares: {ok_count}/{len(targets)} OK{NC}")
+        sys.exit(0)
+    else:
+        err(f"rotate-shares: {ok_count}/{len(targets)} OK, {fail_count} FAILED")
+        sys.exit(1)
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: register-age-pubkey  (fetch age.pub from a client)
+# -----------------------------------------------------------------------------
+def cmd_register_age_pubkey(args):
+    """Fetch /var/lib/socialwarden/age.pub from a client via SSH, store on manager."""
+    require_root()
+    AGE_PUBKEYS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"Machine '{args.machine}' not found in inventory")
+        sys.exit(2)
+    if target.get("role") == "monitor":
+        err(f"{args.machine} is the manager — register-age-pubkey only applies to clients")
+        sys.exit(2)
+
+    step(f"Fetch age pubkey from {args.machine}")
+    r = run_ssh(target["ssh"], "sudo cat /var/lib/socialwarden/age.pub", timeout=15)
+    if r.returncode != 0:
+        err(f"SSH/sudo failed on {args.machine}: {r.stderr.strip()}")
+        sys.exit(2)
+    pubkey = r.stdout.strip()
+    if not pubkey.startswith("age1") or len(pubkey) < 50:
+        err(f"Unexpected age pubkey: {pubkey!r}")
+        sys.exit(2)
+
+    out = AGE_PUBKEYS_DIR / f"{args.machine}.pub"
+    existing = out.read_text().strip() if out.exists() else None
+    if existing and existing != pubkey and not args.force:
+        err(f"Different age pubkey already registered for {args.machine}.")
+        err(f"  existing: {existing[:30]}...")
+        err(f"  fetched : {pubkey[:30]}...")
+        err(f"Use --force to overwrite (target machine likely re-keyed).")
+        sys.exit(2)
+    out.write_text(pubkey + "\n")
+    out.chmod(0o644)
+    info(f"Registered: {out} ({pubkey[:30]}...)")
+    audit("register-age-pubkey", machine=args.machine, pubkey_prefix=pubkey[:30])
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: bundle-push  (age-encrypt env-file, scp to client, optional render)
+# -----------------------------------------------------------------------------
+def cmd_bundle_push(args):
+    """Encrypt an env-file with the target machine's age pubkey and SCP it to
+    /var/lib/socialwarden/bundles/<bundle>.age on the target. With --render, also
+    triggers `socialwarden-agent render <bundle>` to materialize /run/secrets/<bundle>.env.
+    """
+    require_root()
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"Machine '{args.machine}' not found in inventory")
+        sys.exit(2)
+    if target.get("role") == "monitor":
+        err(f"{args.machine} is the manager — bundle-push targets clients only")
+        sys.exit(2)
+
+    bundle = args.bundle
+    if not all(c.isalnum() or c in "-_" for c in bundle) or not bundle:
+        err(f"Invalid bundle name: {bundle!r} (alphanumeric + - _ only)")
+        sys.exit(2)
+
+    pub_path = AGE_PUBKEYS_DIR / f"{args.machine}.pub"
+    if not pub_path.exists():
+        err(f"No age pubkey registered for {args.machine}.")
+        err(f"Run first: sudo socialwarden-manager register-age-pubkey {args.machine}")
+        sys.exit(2)
+    pubkey = pub_path.read_text().strip()
+
+    env_file = Path(args.env_file)
+    if not env_file.exists():
+        err(f"env-file not found: {env_file}")
+        sys.exit(2)
+    if env_file.stat().st_size == 0:
+        err(f"env-file is empty: {env_file}")
+        sys.exit(2)
+
+    BUNDLES_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    out_local = BUNDLES_DIR / f"{args.machine}-{bundle}.age"
+
+    step(f"Encrypt {env_file} → {out_local}  (recipient: {pubkey[:25]}...)")
+    r = subprocess.run(
+        ["age", "-r", pubkey, "-o", str(out_local), str(env_file)],
+        capture_output=True, text=True, timeout=30
+    )
+    if r.returncode != 0:
+        err(f"age encrypt failed: {r.stderr.strip()}")
+        sys.exit(2)
+    out_local.chmod(0o600)
+    size = out_local.stat().st_size
+    info(f"Encrypted ({size} bytes)")
+
+    step(f"Ensure remote bundles dir exists on {args.machine}")
+    r = run_ssh_script(target["ssh"],
+        "set -e; mkdir -p /var/lib/socialwarden/bundles; "
+        "chown root:root /var/lib/socialwarden/bundles; "
+        "chmod 700 /var/lib/socialwarden/bundles; "
+        "echo OK")
+    if r.returncode != 0:
+        err(f"remote mkdir failed: {r.stderr.strip() or r.stdout.strip()}")
+        sys.exit(2)
+
+    step(f"SCP bundle to {args.machine}")
+    parts = target["ssh"].split()
+    if parts[0] != "ssh":
+        err(f"Unexpected ssh string in inventory: {target['ssh']!r}")
+        sys.exit(2)
+    target_addr = parts[-1]                        # e.g. ubuntu@10.0.0.15
+    extra_opts  = " ".join(parts[1:-1])            # e.g. -o ConnectTimeout=10 -o BatchMode=yes
+    tmp_remote  = f"/tmp/{bundle}.age.{int(time.time())}"
+    scp_cmd = (f"scp {_ssh_extra_args()} {extra_opts} "
+               f"{out_local} {target_addr}:{tmp_remote}")
+    r = subprocess.run(scp_cmd, shell=True, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        err(f"SCP failed: {r.stderr.strip()}")
+        sys.exit(2)
+
+    step("Move bundle into place + chmod (root, 600)")
+    move_script = (
+        f"set -e\n"
+        f"mv {tmp_remote} /var/lib/socialwarden/bundles/{bundle}.age\n"
+        f"chown root:root /var/lib/socialwarden/bundles/{bundle}.age\n"
+        f"chmod 600 /var/lib/socialwarden/bundles/{bundle}.age\n"
+        f"ls -la /var/lib/socialwarden/bundles/{bundle}.age\n"
+    )
+    r = run_ssh_script(target["ssh"], move_script)
+    if r.returncode != 0:
+        err(f"remote move failed: {r.stderr.strip() or r.stdout}")
+        sys.exit(2)
+    info(r.stdout.strip().splitlines()[-1])
+
+    if args.render:
+        step(f"Trigger render on {args.machine}")
+        r = run_ssh(target["ssh"], f"sudo socialwarden-agent render {bundle}", timeout=15)
+        if r.returncode != 0:
+            err(f"render failed: {r.stderr.strip() or r.stdout}")
+            sys.exit(2)
+        for line in r.stdout.strip().splitlines():
+            print(f"  {line}")
+
+    audit("bundle-push", machine=args.machine, bundle=bundle,
+          bytes=size, recipient_prefix=pubkey[:30], rendered=args.render)
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: break-glass-emit  (generate paper-only share x=N+1)
+# -----------------------------------------------------------------------------
+# After enroll-shamir succeeds, the operator can generate ONE additional share
+# (x=N+1, outside the regular distribution) for offline storage. This share is
+# never persisted on disk by the manager — it's printed once to stdout and the
+# operator is expected to write it to paper, store in a safe deposit box, and
+# walk away.
+#
+# Mathematical note: a Shamir polynomial of degree K-1 has infinite valid
+# share points. We reuse the polynomial used during enroll-shamir by
+# reconstructing the master, re-splitting with the SAME random seed... but the
+# split function uses fresh random coefficients each call, so we'd get a
+# DIFFERENT polynomial. The break-glass share must come from the ORIGINAL
+# polynomial.
+#
+# Pragmatic solution: the operator runs `break-glass-emit` IMMEDIATELY after
+# enroll-shamir while the master is still being supplied via stdin in a
+# parallel session. We accept the master fresh, fit a polynomial through the
+# CURRENT shares (manager + peers, K total), evaluate at x=N+1, output. The
+# math: with K shares we can compute the polynomial coefficients and evaluate
+# at any new x. shamir.combine_bytes already does step 1; we extend with a
+# polynomial-fit + evaluation helper.
+#
+# Simpler implementation: the operator pastes the master, we re-split with
+# THIS run's random coefficients, and write all N+1 shares. Then we OVERWRITE
+# the existing N shares everywhere (just like rotate-shares) and emit x=N+1
+# to stdout. End state: fresh shares everywhere + paper share consistent.
+def cmd_break_glass_emit(args):
+    """Generate the (N+1)-th share for offline paper storage.
+
+    Operator workflow:
+      1. echo -n '<master>' | sudo socialwarden-manager break-glass-emit <machine>
+      2. Tool re-splits with K=3, N+1=6 shares, redistributes shares 1..N
+         like rotate-shares does, prints share 6 to stdout.
+      3. Operator prints share 6 on paper, stores in safe.
+
+    This implicitly rotates all the regular shares (since we use a fresh
+    polynomial). That's fine — keeps things consistent.
+    """
+    require_root()
+    ensure_state_dirs()
+
+    machines = load_inventory()
+    target = find_machine(args.machine, machines)
+    if not target:
+        err(f"Machine '{args.machine}' not found in inventory")
+        sys.exit(2)
+    sh_meta = target.get("socialwarden", {}).get("shamir") or {}
+    if not sh_meta.get("enabled"):
+        err(f"{args.machine} not Shamir-enrolled. Run enroll-shamir first.")
+        sys.exit(2)
+
+    if sys.stdin.isatty():
+        err("Master must come from stdin:")
+        err("  echo -n '<master>' | sudo socialwarden-manager break-glass-emit <machine>")
+        sys.exit(2)
+    master = sys.stdin.read()
+    if master.endswith("\n"):
+        master = master[:-1]
+    if not master or len(master) < 8:
+        err("Empty/short master")
+        sys.exit(2)
+
+    # Sanity: the provided master MUST match the canary fingerprint stored at
+    # enroll-shamir. Without a canary we have no way to validate the operator
+    # didn't typo the master — and storing a paper share derived from the
+    # WRONG master makes future recovery impossible. Refuse to proceed.
+    canary_path = STATE_DIR / "canaries" / f"{args.machine}.fp"
+    if not canary_path.exists():
+        err(f"No canary fingerprint for {args.machine}.")
+        err(f"  Run first:  sudo socialwarden-manager verify-shamir --machine {args.machine}")
+        err(f"  This validates current shares can reconstruct the master AND seeds the canary.")
+        sys.exit(3)
+    provided_fp = _canary_fp(master.encode())
+    stored_fp = canary_path.read_text().strip()
+    if provided_fp != stored_fp:
+        err(f"Master fingerprint sha256:{provided_fp} != stored canary sha256:{stored_fp}")
+        err("This master does NOT match the one used at enroll. Aborting.")
+        sys.exit(3)
+    info(f"Master matches stored canary (sha256:{provided_fp})")
+
+    k = int(sh_meta.get("k", 3))
+    n = int(sh_meta.get("n", 5))
+    n_with_bg = n + 1
+
+    print(f"\n{BOLD}Generating {n_with_bg} shares (K={k}, N+1={n_with_bg}) for {args.machine}{NC}")
+    print(f"  {DIM}Note: regular N={n} shares will be rotated to fresh values.{NC}")
+
+    import shamir  # type: ignore
+    new_shares = shamir.split_bytes(master.encode(), k, n_with_bg)
+    master = ""
+    if len(new_shares) != n_with_bg:
+        err(f"Unexpected share count {len(new_shares)} != {n_with_bg}")
+        sys.exit(4)
+
+    # x=1 → target, x=2..N-1 → peers, x=N → manager, x=N+1 → paper
+    target_share = new_shares[0]
+    peer_shares = new_shares[1:n - 1]
+    mgr_share = new_shares[n - 1]
+    bg_share = new_shares[n_with_bg - 1]
+    peer_names = sh_meta.get("peers", [])
+
+    # Distribute (mirrors enroll-shamir, no rollback for simplicity since we
+    # checked the canary first — operator should re-run if it errors out).
+    tmpdir = Path(f"/tmp/swd-bg-{int(time.time()*1000)}")
+    tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    step("Distribute fresh shares 1..N (paper share retained)")
+    local_tmp = tmpdir / "target.share"
+    local_tmp.write_text(shamir.fmt_share(*target_share) + "\n")
+    local_tmp.chmod(0o600)
+    if not _scp_to(target["ssh"], str(local_tmp), "/var/lib/socialwarden/local.share"):
+        err(f"target {args.machine} install failed")
+        sys.exit(5)
+    info(f"  target:/var/lib/socialwarden/local.share (x={target_share[0]})")
+
+    for pn, sh in zip(peer_names, peer_shares):
+        peer = find_machine(pn, machines)
+        if not peer:
+            err(f"peer {pn} disappeared — aborting before writing manager")
+            sys.exit(5)
+        peer_tmp = tmpdir / f"peer-{pn}.share"
+        peer_tmp.write_text(shamir.fmt_share(*sh) + "\n")
+        peer_tmp.chmod(0o600)
+        if not _scp_to(peer["ssh"], str(peer_tmp),
+                       f"/var/lib/socialwarden/peer-shares/{args.machine}.share"):
+            err(f"peer {pn} install failed")
+            sys.exit(5)
+        info(f"  {pn}:/var/lib/socialwarden/peer-shares/{args.machine}.share (x={sh[0]})")
+
+    mgr_path = SHARES_DIR / f"{args.machine}.share"
+    mgr_tmp = mgr_path.with_suffix(".share.new")
+    fd = os.open(str(mgr_tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.write(fd, (shamir.fmt_share(*mgr_share) + "\n").encode())
+    os.close(fd)
+    os.replace(mgr_tmp, mgr_path)
+    info(f"  manager:{mgr_path} (x={mgr_share[0]})")
+
+    for f in tmpdir.glob("*"):
+        try: f.unlink()
+        except OSError: pass
+    try: tmpdir.rmdir()
+    except OSError: pass
+
+    # Inventory: bump break-glass timestamp
+    for m in machines:
+        if m["name"] == args.machine:
+            m["socialwarden"]["shamir"]["break_glass_emitted_at"] = datetime.now(timezone.utc).isoformat()
+            break
+    save_inventory(machines)
+
+    audit("break-glass-emit", machine=args.machine, k=k, n=n, n_with_bg=n_with_bg,
+          peers=peer_names)
+
+    # PAPER OUTPUT — operator must write this down
+    print()
+    print(f"{BOLD}{YELLOW}══════════════════════════════════════════════════════════════════{NC}")
+    print(f"{BOLD}{YELLOW}  BREAK-GLASS SHARE (PRINT ON PAPER, STORE IN SAFE){NC}")
+    print(f"{BOLD}{YELLOW}══════════════════════════════════════════════════════════════════{NC}")
+    print(f"{BOLD}  Machine:   {args.machine}{NC}")
+    print(f"{BOLD}  K-of-N:    {k}-of-{n} (this is share #{n + 1}, the paper-only share){NC}")
+    print(f"{BOLD}  Generated: {datetime.now(timezone.utc).isoformat()}{NC}")
+    print()
+    print(f"{BOLD}    {shamir.fmt_share(*bg_share)}{NC}")
+    print()
+    print(f"{BOLD}{YELLOW}══════════════════════════════════════════════════════════════════{NC}")
+    print(f"  See BREAK-GLASS-RUNBOOK.md for use instructions.")
+    print(f"  This share is NOT saved anywhere on disk by this tool.")
+    print(f"  If you don't write it down NOW, you cannot recover it.")
+    print()
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: verify-shamir  (canary: can the master still be reconstructed?)
+# -----------------------------------------------------------------------------
+# Cron-friendly hourly health check. For each machine:
+#   1. Read manager's share (local)
+#   2. SSH+read K-1 peer shares
+#   3. Combine. Master in process memory only — NEVER written, logged, or sent.
+#   4. Compare against a known-good canary fingerprint:
+#        - First time we verify a machine, store sha256(master)[:16] as the canary
+#          in /var/lib/socialwarden-manager/canaries/<machine>.fp
+#        - Subsequent verifies compare. If mismatch → operator alerted (a peer
+#          may be serving stale shares from before a rotation, or a holder
+#          got compromised + tampered with).
+#
+# Returns exit 0 if all checks pass, exit 1 if any fails.
+def _canary_fp(master_bytes: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(master_bytes).hexdigest()[:16]
+
+
+def cmd_verify_shamir(args):
+    """Verify Shamir reconstruction works for one or all enrolled machines.
+
+    Output is concise and cron-friendly:
+      machine_name  status  details
+    """
+    require_root()
+    ensure_state_dirs()
+    canary_dir = STATE_DIR / "canaries"
+    canary_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    machines = load_inventory()
+    if args.machine:
+        targets = [m for m in machines if m["name"] == args.machine]
+        if not targets:
+            err(f"Machine '{args.machine}' not in inventory")
+            sys.exit(2)
+    else:
+        targets = [m for m in machines
+                   if (m.get("socialwarden", {}).get("shamir") or {}).get("enabled")]
+
+    if not targets:
+        warn("No Shamir-enrolled machines to verify.")
+        return
+
+    print(f"\n{BOLD}Shamir verify — {len(targets)} machine(s){NC}")
+    print(f"  {'machine':<18}  {'status':<6}  {'fingerprint':<18}  {'detail'}")
+    print(f"  {'-'*18}  {'-'*6}  {'-'*18}  {'-'*30}")
+
+    fail_count = 0
+    import shamir  # type: ignore
+    for tgt in targets:
+        name = tgt["name"]
+        sh_meta = tgt.get("socialwarden", {}).get("shamir") or {}
+        if not sh_meta.get("enabled"):
+            print(f"  {name:<18}  {YELLOW}SKIP{NC}    {'(not shamir)':<18}")
+            continue
+        k = int(sh_meta.get("k", 3))
+
+        shares = _read_full_share_set(name, machines, sh_meta, k)
+        if shares is None:
+            print(f"  {name:<18}  {RED}FAIL{NC}    {'-':<18}  could not collect K shares")
+            audit("verify-shamir-fail", machine=name, reason="not_enough_shares")
+            fail_count += 1
+            continue
+
+        try:
+            master_bytes = shamir.combine_bytes(shares)
+        except Exception as e:
+            print(f"  {name:<18}  {RED}FAIL{NC}    {'-':<18}  combine error: {str(e)[:30]}")
+            audit("verify-shamir-fail", machine=name, reason="combine_error", err=str(e)[:100])
+            fail_count += 1
+            continue
+
+        fp = _canary_fp(master_bytes)
+        master_bytes = b""
+
+        canary_path = canary_dir / f"{name}.fp"
+        if canary_path.exists():
+            stored = canary_path.read_text().strip()
+            if stored == fp:
+                print(f"  {name:<18}  {GREEN}OK{NC}      sha256:{fp}  canary match")
+                audit("verify-shamir-ok", machine=name, fp=fp)
+            else:
+                print(f"  {name:<18}  {RED}DRIFT{NC}   sha256:{fp}  expected {stored}")
+                audit("verify-shamir-drift", machine=name, expected=stored, got=fp)
+                fail_count += 1
+        else:
+            # First verify ever for this machine — store the canary
+            canary_path.write_text(fp + "\n")
+            canary_path.chmod(0o600)
+            print(f"  {name:<18}  {GREEN}OK{NC}      sha256:{fp}  canary stored (first verify)")
+            audit("verify-shamir-canary-init", machine=name, fp=fp)
+
+    print()
+    if fail_count == 0:
+        info(f"{BOLD}verify-shamir: all OK{NC}")
+        sys.exit(0)
+    else:
+        err(f"verify-shamir: {fail_count} failure(s)")
+        sys.exit(1)
+
+
+def cmd_audit_tail(args):
+    if not AUDIT_LOG.exists():
+        warn(f"No audit log at {AUDIT_LOG}")
+        return
+    n = args.n or 40
+    try:
+        lines = open(AUDIT_LOG).readlines()[-n:]
+    except PermissionError:
+        err(f"Cannot read {AUDIT_LOG} — run with sudo")
+        sys.exit(2)
+    for line in lines:
+        try:
+            ev = json.loads(line)
+            ts = ev.get("ts", "")[:19]
+            what = ev.get("event", "?")
+            rest = " ".join(f"{k}={v}" for k, v in ev.items() if k not in ("ts", "event"))
+            print(f"{DIM}{ts}{NC}  {BOLD}{what:<18}{NC}  {rest}")
+        except json.JSONDecodeError:
+            continue
+
+
+# -----------------------------------------------------------------------------
+# Entry point
+# -----------------------------------------------------------------------------
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="socialwarden-manager",
+        description="SocialWarden fleet orchestrator (manager / head).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("status", help="manager readiness + paths + tailscale")
+    sub.add_parser("list", help="fleet state from inventory.json")
+
+    p_ri = sub.add_parser("register-identity", help="fetch ed25519 pubkey via SSH and register it")
+    p_ri.add_argument("machine")
+    p_ri.add_argument("--force", action="store_true", help="overwrite an existing different key (dangerous)")
+
+    sub.add_parser("list-identities", help="list all registered peer pubkeys")
+    sub.add_parser("distribute-pubkeys", help="push all registered pubkeys to every peer (idempotent)")
+
+    p_rap = sub.add_parser("register-age-pubkey",
+        help="fetch a client's age recipient pubkey via SSH and store on manager")
+    p_rap.add_argument("machine")
+    p_rap.add_argument("--force", action="store_true",
+        help="overwrite an existing different pubkey (e.g. after re-key)")
+
+    p_bp = sub.add_parser("bundle-push",
+        help="age-encrypt an env-file with a client's pubkey and SCP it to /var/lib/socialwarden/bundles/")
+    p_bp.add_argument("machine", help="target machine (must be in inventory)")
+    p_bp.add_argument("bundle", help="bundle name (alphanumeric + - _)")
+    p_bp.add_argument("--env-file", required=True, help="path to local plaintext env-file")
+    p_bp.add_argument("--render", action="store_true",
+        help="after upload, run `socialwarden-agent render <bundle>` on the target")
+
+    p_en = sub.add_parser("enroll-shamir",
+        help="enroll a machine with K-of-N Shamir-split master (master read from stdin)")
+    p_en.add_argument("machine")
+    p_en.add_argument("--k", type=int, default=3,
+        help="threshold: shares required to reconstruct (default: 3)")
+    p_en.add_argument("--n", type=int, default=5,
+        help="total shares produced (default: 5; distribution: 1 local + N-2 peers + 1 manager)")
+    p_en.add_argument("--peers", default=None,
+        help="comma-separated peer names (default: auto-select first N-2 alphabetical eligible)")
+    p_en.add_argument("--force", action="store_true",
+        help="re-enroll a machine that already has shamir.enabled=true (DESTRUCTIVE: invalidates all old shares)")
+    p_en.add_argument("--dry-run", action="store_true",
+        help="validate prereqs, enable peer endpoints, but stop BEFORE splitting/distributing shares")
+
+    p_rc = sub.add_parser("recover", help="recover a machine (2 Shamir shares)")
+    p_rc.add_argument("machine")
+
+    p_rv = sub.add_parser("revoke",
+        help="ROTATE master (NEW) + revoke OLD shares (post-compromise). "
+             "NEW master from stdin. Requires --confirm.")
+    p_rv.add_argument("machine")
+    p_rv.add_argument("--confirm", action="store_true",
+        help="confirm this destructive operation (without it, prints plan and exits)")
+
+    p_rs = sub.add_parser("rotate-shares",
+        help="rotate Shamir shares (same master, fresh polynomial). Cron-friendly: monthly")
+    p_rs.add_argument("--machine", default=None,
+        help="rotate only this one machine (default: all shamir-enrolled)")
+    p_rs.add_argument("--dry-run", action="store_true",
+        help="reconstruct + report what would change, but do not write new shares")
+
+    p_sp = sub.add_parser("shamir-split", help="split a secret from stdin (K-of-N)")
+    p_sp.add_argument("--k", type=int, required=True)
+    p_sp.add_argument("--n", type=int, required=True)
+
+    p_sc = sub.add_parser("shamir-combine", help="combine shares from stdin → secret")
+    p_sc.add_argument("--k", type=int, default=None,
+        help="enforce minimum K shares (rejects garbage-output from K-1 interpolation)")
+
+    p_vs = sub.add_parser("verify-shamir",
+        help="verify reconstruction works for enrolled machines (cron-friendly)")
+    p_vs.add_argument("--machine", default=None,
+        help="verify just this one (default: all enrolled)")
+
+    p_bg = sub.add_parser("break-glass-emit",
+        help="emit paper-only share x=N+1 for offline storage (master from stdin)")
+    p_bg.add_argument("machine")
+
+    p_at = sub.add_parser("audit-tail", help="tail manager audit log")
+    p_at.add_argument("-n", type=int, default=40)
+
+    sub.add_parser("help", help="show this help")
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    cmds = {
+        "status":            cmd_status,
+        "list":              cmd_list,
+        "register-identity":  cmd_register_identity,
+        "list-identities":     cmd_list_identities,
+        "distribute-pubkeys":  cmd_distribute_pubkeys,
+        "register-age-pubkey": cmd_register_age_pubkey,
+        "bundle-push":         cmd_bundle_push,
+        "enroll-shamir":     cmd_enroll_shamir,
+        "recover":           cmd_recover,
+        "revoke":            cmd_revoke,
+        "rotate-shares":     cmd_rotate_shares,
+        "verify-shamir":     cmd_verify_shamir,
+        "break-glass-emit":  cmd_break_glass_emit,
+        "shamir-split":      cmd_shamir_split,
+        "shamir-combine":    cmd_shamir_combine,
+        "audit-tail":        cmd_audit_tail,
+        "help":              lambda _: parser.print_help(),
+    }
+
+    cmd = cmds.get(args.command)
+    if cmd is None:
+        parser.print_help()
+        sys.exit(2)
+
+    # Defense-in-depth: any subcommand that takes a `machine` (positional or
+    # --machine) must validate before its body runs. A single chokepoint here
+    # avoids per-command mistakes.
+    validate_machine_name(getattr(args, "machine", None))
+
+    # Atomic transactions: hold the inventory lock across the entire cmd body
+    # for any command that may mutate inventory (read-modify-write). Reentrant,
+    # so the inner save_inventory call inside cmd_* re-enters cheaply.
+    # Read-only or write-elsewhere commands skip the lock to keep them snappy.
+    NON_MUTATING = {"status", "list", "list-identities", "audit-tail",
+                     "shamir-split", "shamir-combine", "verify-shamir", "help"}
+    if args.command in NON_MUTATING:
+        cmd(args)
+    else:
+        with inventory_lock():
+            cmd(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Documentación — Trivy Security</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#f8f9fc;--card:#fff;--card2:#f3f4f8;--brd:#e5e7ee;--tx:#1a1c2e;--tx2:#5c5f78;--tx3:#9b9db3;--acc:#5558e6;--accbg:#5558e612;--sc:#dc2645;--scb:#dc264510;--sh:#e05520;--shb:#e0552010;--sm:#b45309;--smb:#b4530910;--ok:#0d9668;--okb:#0d966810;--sl:#2d7dd2;--slb:#2d7dd210}
+@media(prefers-color-scheme:dark){:root{--bg:#0c0d12;--card:#14161e;--card2:#1a1d28;--brd:#22253a;--tx:#f4f5f9;--tx2:#b8bcd0;--tx3:#7b7f99;--acc:#6c72ff;--accbg:#6c72ff15;--sc:#ff3b5c;--scb:#ff3b5c18;--sh:#ff6b35;--shb:#ff6b3518;--sm:#ffb020;--smb:#ffb02018;--ok:#34d399;--okb:#34d39918;--sl:#4d9fff;--slb:#4d9fff18}}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--tx);line-height:1.8;font-size:15px}
+.page{max-width:860px;margin:0 auto;padding:40px 24px 80px}
+.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--tx3);text-decoration:none;margin-bottom:32px;transition:color .18s}.back-link:hover{color:var(--acc)}
+.back-link svg{width:16px;height:16px}
+h1{font-size:32px;font-weight:700;letter-spacing:-.5px;margin-bottom:6px;display:flex;align-items:center;gap:12px}
+.subtitle{font-size:14px;color:var(--tx3);margin-bottom:40px}
+.toc{background:var(--card);border:1px solid var(--brd);border-radius:14px;padding:24px 28px;margin-bottom:40px}
+.toc-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--tx3);margin-bottom:14px}
+.toc-list{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.toc-list a{font-size:13px;color:var(--acc);text-decoration:none;display:flex;align-items:center;gap:6px;padding:4px 0;transition:color .18s}.toc-list a:hover{color:var(--tx)}
+.toc-list a::before{content:'→';color:var(--tx3);font-size:11px}
+section{margin-bottom:48px}
+h2{font-size:22px;font-weight:700;letter-spacing:-.3px;margin-bottom:16px;padding-bottom:10px;border-bottom:2px solid var(--brd);display:flex;align-items:center;gap:8px}
+h3{font-size:17px;font-weight:700;margin-bottom:10px;margin-top:24px;color:var(--tx)}
+p{font-size:15px;color:var(--tx2);margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:20px;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.3px}
+.badge-sc{background:var(--scb);color:var(--sc)}
+.badge-sh{background:var(--shb);color:var(--sh)}
+.badge-sm{background:var(--smb);color:var(--sm)}
+.badge-ok{background:var(--okb);color:var(--ok)}
+.badge-acc{background:var(--accbg);color:var(--acc)}
+.badge-sl{background:var(--slb);color:var(--sl)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.icon-box{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0}
+.flow-step{background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;color:var(--tx2)}
+.flow-arrow{color:var(--tx3);font-size:14px}
+.code{font-family:'JetBrains Mono',monospace;font-size:13px;background:var(--card2);border:1px solid var(--brd);border-radius:8px;padding:14px;margin:10px 0;line-height:1.6;overflow-x:auto;white-space:pre-wrap;color:var(--tx2)}
+.table-wrap{overflow-x:auto;margin:12px 0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:12px 16px;background:var(--card2);color:var(--tx3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-bottom:2px solid var(--brd)}
+td{padding:12px 16px;border-bottom:1px solid var(--brd);color:var(--tx2)}
+tr:hover td{background:var(--card2)}
+.note{background:var(--accbg);border:1px solid var(--acc);border-radius:8px;padding:16px 18px;font-size:15px;color:var(--acc);margin:12px 0;display:flex;align-items:flex-start;gap:10px}
+.note-warn{background:var(--smb);border-color:var(--sm);color:var(--sm)}
+.note-danger{background:var(--scb);border-color:var(--sc);color:var(--sc)}
+.note-ok{background:var(--okb);border-color:var(--ok);color:var(--ok)}
+.note svg{flex-shrink:0;margin-top:1px}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
+.machine-tag{color:#fff;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:600}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}.toc-list{grid-template-columns:1fr}.flow{flex-direction:column;align-items:flex-start}}
+
+.scroll-top{position:fixed;bottom:24px;right:24px;width:42px;height:42px;border-radius:50%;background:var(--acc);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.2);opacity:0;pointer-events:none;transition:all .25s ease;z-index:999;font-size:18px}
+.scroll-top.show{opacity:1;pointer-events:auto}
+.scroll-top:hover{transform:scale(1.1);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+</style>
+</head>
+<body>
+<div class="page">
+
+<a href="/" class="back-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> Volver al dashboard</a>
+
+<h1>🛡️ Trivy Security — Guía completa</h1>
+<p class="subtitle">Todo lo que necesitas saber para usar el dashboard de seguridad de tu SOC.</p>
+
+<!-- TABLE OF CONTENTS -->
+<div class="toc">
+<div class="toc-title">Índice</div>
+<ul class="toc-list">
+<li><a href="#que-es">Qué es Trivy Security</a></li>
+<li><a href="#pipeline">Cómo funciona el pipeline</a></li>
+<li><a href="#navegacion">Cómo navegar el dashboard</a></li>
+<li><a href="#tarjetas">Tarjetas de resumen</a></li>
+<li><a href="#grafico">Gráfico de tendencias</a></li>
+<li><a href="#pestanas">Pestañas</a></li>
+<li><a href="#detalle">Panel de detalle (8 secciones)</a></li>
+<li><a href="#severidades">Severidades</a></li>
+<li><a href="#conflictos">Tipos de conflicto</a></li>
+<li><a href="#exposicion">Exposición a internet</a></li>
+<li><a href="#dependencias">Dependencias reales</a></li>
+<li><a href="#ia">Análisis con IA</a></li>
+<li><a href="#maquinas">Máquinas de la infraestructura</a></li>
+<li><a href="#como-actuar">Cómo actuar ante una vulnerabilidad</a></li>
+<li><a href="#automatizacion">Automatización y cron</a></li>
+<li><a href="#anadir-maquina">Añadir una máquina nueva</a></li>
+<li><a href="#glosario">Glosario</a></li>
+</ul>
+</div>
+
+<!-- 1. QUÉ ES -->
+<section id="que-es">
+<h2>🔍 ¿Qué es Trivy Security?</h2>
+<p>Trivy Security es un dashboard de seguridad para tu SOC (Security Operations Center). Escanea automáticamente todas las imágenes Docker y paquetes del sistema operativo de las máquinas de tu fleet, buscando vulnerabilidades de seguridad conocidas (CVEs).</p>
+<p>No solo detecta vulnerabilidades — las explica con inteligencia artificial, identifica dependencias reales, detecta conflictos de actualización, y marca las que están expuestas a internet para que sepas exactamente qué arreglar primero y cómo.</p>
+
+<div class="grid3">
+<div class="card" style="text-align:center">
+<div style="font-size:28px;font-weight:700;color:var(--acc)">1,037</div>
+<div style="font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Vulnerabilidades detectadas</div>
+</div>
+<div class="card" style="text-align:center">
+<div style="font-size:28px;font-weight:700;color:var(--sc)">146</div>
+<div style="font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Expuestas a internet</div>
+</div>
+<div class="card" style="text-align:center">
+<div style="font-size:28px;font-weight:700;color:var(--ok)">100%</div>
+<div style="font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Analizadas con IA</div>
+</div>
+</div>
+</section>
+
+<!-- 2. PIPELINE -->
+<section id="pipeline">
+<h2>⚙️ Cómo funciona el pipeline</h2>
+<p>Cada domingo a la 1:00 AM se ejecuta automáticamente el escaneo completo. El pipeline tiene 6 fases:</p>
+
+<div class="flow">
+<div class="flow-step">1. Escaneo Trivy</div><span class="flow-arrow">→</span>
+<div class="flow-step">2. Generación JSON</div><span class="flow-arrow">→</span>
+<div class="flow-step">3. IA carry-over</div><span class="flow-arrow">→</span>
+<div class="flow-step">4. Enrich con IA</div><span class="flow-arrow">→</span>
+<div class="flow-step">5. Dependencias</div><span class="flow-arrow">→</span>
+<div class="flow-step">6. Dashboard</div>
+</div>
+
+<div class="card">
+<div class="card-title">Detalle de cada fase</div>
+<p><strong>1. Escaneo Trivy</strong> — Conecta por SSH a cada máquina, lista todos los contenedores Docker, y ejecuta <code>trivy image</code> en cada uno. También escanea paquetes del sistema operativo host.</p>
+<p><strong>2. Generación JSON</strong> — Consolida todos los resultados en <code>latest.json</code>, deduplica por CVE+paquete, detecta qué máquinas e imágenes tienen cada vulnerabilidad, y genera la resolución de las que desaparecieron.</p>
+<p><strong>3. IA carry-over</strong> — Antes de sobrescribir, copia las explicaciones de IA del scan anterior para los CVEs que siguen presentes. Así el enrich solo tiene que procesar las genuinamente nuevas.</p>
+<p><strong>4. Enrich con IA</strong> — Usa Claude CLI para generar explicaciones en español: qué es, por qué es grave, y cómo arreglarlo. Solo para CVEs nuevos que no tenían explicación.</p>
+<p><strong>5. Dependencias + Exposición + Clasificación</strong> — Conecta a cada contenedor para obtener las dependencias reales de cada paquete. Cruza con la lista de servicios expuestos a internet. Clasifica los conflictos por tipo de riesgo.</p>
+<p><strong>6. Dashboard</strong> — El HTML lee los JSON y muestra todo organizado. No necesita build, server, ni base de datos. Es un fichero estático que se sirve con nginx.</p>
+</div>
+</section>
+
+<!-- 3. NAVEGACIÓN -->
+<section id="navegacion">
+<h2>🧭 Cómo navegar el dashboard</h2>
+<p>El dashboard tiene 4 zonas principales, de arriba a abajo:</p>
+
+<div class="card">
+<div class="card-title">1. Tarjetas de resumen (arriba)</div>
+<p>4 tarjetas con los totales: Críticos, Altos, Medios, Total. Son clickeables — hacen click para filtrar por esa severidad. El gráfico se sincroniza automáticamente.</p>
+</div>
+
+<div class="card">
+<div class="card-title">2. Gráfico de tendencias (colapsable)</div>
+<p>Muestra la evolución de vulnerabilidades a lo largo del tiempo. Click en una línea o en la leyenda filtra por esa severidad. Hover resalta la línea estilo Grafana. Se colapsa automáticamente cuando usas las pestañas.</p>
+</div>
+
+<div class="card">
+<div class="card-title">3. Pestañas (centro)</div>
+<p>5 vistas independientes: Máquinas, Actuar, Monitorizar, Conflictos, Resueltas. Los filtros de las pestañas son independientes de los filtros de las tarjetas/gráfico.</p>
+</div>
+
+<div class="card">
+<div class="card-title">4. Lista de vulnerabilidades (abajo)</div>
+<p>Aparece cuando filtras por severidad (tarjetas/gráfico) o cuando entras en una pestaña. Tiene buscador, chips de severidad, e infinite scroll (carga de 50 en 50 al bajar).</p>
+</div>
+
+<div class="note">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+<div><strong>Memoria</strong> — La URL guarda tu posición: pestaña, máquina, filtro de severidad, CVE abierto, y estado del gráfico. Al refrescar la página, vuelves exactamente donde estabas.</div>
+</div>
+</section>
+
+<!-- 4. TARJETAS -->
+<section id="tarjetas">
+<h2>📊 Tarjetas de resumen</h2>
+<p>Las 4 tarjetas de la parte superior son el punto de entrada principal:</p>
+<div class="table-wrap">
+<table>
+<tr><th>Tarjeta</th><th>Click</th><th>Click de nuevo</th></tr>
+<tr><td><span class="badge badge-sc">Críticos</span></td><td>Filtra solo las críticas + gráfico aísla línea roja</td><td>Limpia todo</td></tr>
+<tr><td><span class="badge badge-sh">Altos</span></td><td>Filtra solo los altos + gráfico aísla línea naranja</td><td>Limpia todo</td></tr>
+<tr><td><span class="badge badge-sm">Medios</span></td><td>Filtra solo los medios + gráfico aísla línea amarilla</td><td>Limpia todo</td></tr>
+<tr><td><span class="badge badge-acc">Total</span></td><td>Muestra todas las vulnerabilidades</td><td>Limpia todo</td></tr>
+</table>
+</div>
+<p>Las tarjetas y el gráfico están enlazados: si filtras desde una tarjeta, el gráfico se actualiza, y viceversa.</p>
+</section>
+
+<!-- 5. GRÁFICO -->
+<section id="grafico">
+<h2>📈 Gráfico de tendencias</h2>
+<p>Muestra la evolución de vulnerabilidades a lo largo del tiempo con 4 líneas: Total (morado), Críticos (rojo), Altos (naranja), Medios (amarillo).</p>
+<div class="table-wrap">
+<table>
+<tr><th>Acción</th><th>Resultado</th></tr>
+<tr><td>Hover sobre una línea</td><td>Se engrosa y las demás se atenúan (estilo Grafana)</td></tr>
+<tr><td>Click en una línea</td><td>Filtra las vulnerabilidades de esa severidad debajo</td></tr>
+<tr><td>Click en la leyenda</td><td>Mismo efecto que click en línea</td></tr>
+<tr><td>Click en el header</td><td>Colapsa/expande el gráfico</td></tr>
+<tr><td>Seleccionar una pestaña</td><td>El gráfico se colapsa automáticamente</td></tr>
+</table>
+</div>
+<p>El eje izquierdo (Y) muestra Total y Altos (números grandes). El eje derecho muestra Críticos y Medios (números más pequeños) para que ambas escalas sean legibles.</p>
+<p>Los datos se acumulan con cada escaneo semanal, con un máximo de 52 semanas (1 año). Solo se guarda el último escaneo de cada día.</p>
+</section>
+
+<!-- 6. PESTAÑAS -->
+<section id="pestanas">
+<h2>📑 Pestañas</h2>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-acc">Máquinas</span></div>
+<p>Vista de los servidores de tu fleet. Cada tarjeta muestra cuántas vulnerabilidades tiene por severidad. Las máquinas en gris no se pudieron escanear. Al hacer click en una máquina, ves solo sus vulnerabilidades con chips de severidad para filtrar.</p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-ok">Actuar</span></div>
+<p>Vulnerabilidades que <strong>tienen solución disponible</strong>. Trivy detectó una versión del paquete que corrige el problema. Estas son las que hay que priorizar — especialmente las marcadas con 🌐 (expuestas a internet).</p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-sm">Monitorizar</span></div>
+<p>Vulnerabilidades que <strong>NO tienen solución disponible</strong>. El proveedor del paquete aún no ha publicado un parche. No puedes hacer nada excepto esperar y vigilar que se publique una actualización.</p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-sc">Conflictos</span></div>
+<p>Vulnerabilidades que tienen solución PERO <strong>actualizarlas puede causar problemas</strong>. Son las más delicadas. Cada conflicto tiene su tipo y nivel de riesgo (ver sección <a href="#conflictos">Tipos de conflicto</a>).</p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-ok">Resueltas</span></div>
+<p>Vulnerabilidades que ya <strong>no aparecen en el último escaneo</strong>. Se arreglaron, la imagen se actualizó, o el contenedor fue eliminado. Muestran un badge verde con la fecha de resolución.</p>
+</div>
+</section>
+
+<!-- 7. DETALLE -->
+<section id="detalle">
+<h2>🔎 Panel de detalle (8 secciones)</h2>
+<p>Al hacer click en cualquier vulnerabilidad se despliega su detalle completo con 8 secciones:</p>
+
+<div class="card">
+<div class="card-title">1. ¿Qué es esta vulnerabilidad?</div>
+<p>Explicación en español sencillo generada por IA. Describe qué hace la vulnerabilidad, cómo funciona el ataque, y qué permite al atacante. Sin jerga técnica.</p>
+</div>
+
+<div class="card">
+<div class="card-title">2. ¿Por qué es crítico/alto/medio?</div>
+<p>Explicación del impacto real en tu infraestructura específica. Menciona las máquinas afectadas y el riesgo concreto para el negocio.</p>
+</div>
+
+<div class="card">
+<div class="card-title">3. Paquete afectado</div>
+<p>Nombre del paquete, si viene de una imagen Docker o del sistema operativo, versión actual instalada (en rojo), y versión corregida (en verde). Si no hay versión corregida, dice "Sin solución aún".</p>
+</div>
+
+<div class="card">
+<div class="card-title">4. ¿Dónde afecta?</div>
+<p>Lista de máquinas con las imágenes Docker que contienen el paquete vulnerable. Cada imagen muestra el servicio del docker-compose entre paréntesis. Al pasar el ratón muestra la ruta del compose en el servidor.</p>
+<p>Si la vulnerabilidad está expuesta a internet, aparece un banner rojo: <span style="background:var(--scb);color:var(--sc);padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600">🌐 Expuesto a internet via api.example.com</span></p>
+</div>
+
+<div class="card">
+<div class="card-title">5. Paquetes dependientes</div>
+<p>Lista de paquetes reales que dependen del paquete vulnerable, obtenidos directamente de cada contenedor con <code>dpkg-query</code> (Debian) o <code>apk info --rdepends</code> (Alpine). Si actualizas el paquete, estos otros paquetes pueden verse afectados.</p>
+</div>
+
+<div class="card">
+<div class="card-title">6. Conflicto de actualización</div>
+<p>Solo aparece si hay conflicto. Muestra dos badges (tipo + riesgo) y 4 campos: Problema, Situación actual, Qué pasa si actualizas, y Recomendación. Ver sección <a href="#conflictos">Tipos de conflicto</a> para más detalle.</p>
+</div>
+
+<div class="card">
+<div class="card-title">7. ¿Qué hacer?</div>
+<p>Pasos exactos para arreglar. Tres colores:</p>
+<p><span style="background:var(--okb);color:var(--ok);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">Verde</span> — Seguro de actualizar</p>
+<p><span style="background:var(--smb);color:var(--sm);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">Naranja</span> — Actualizar con cuidado (conflicto)</p>
+<p><span style="background:var(--card2);color:var(--tx3);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;border:1px solid var(--brd)">Gris</span> — Sin solución disponible</p>
+</div>
+
+<div class="card">
+<div class="card-title">8. Enlace NVD</div>
+<p>Link a la Base de Datos Nacional de Vulnerabilidades de EEUU (NVD) donde está toda la información técnica oficial del CVE: vector de ataque, score CVSS, referencias, y parches.</p>
+</div>
+</section>
+
+<!-- 8. SEVERIDADES -->
+<section id="severidades">
+<h2>🚨 Severidades</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Severidad</th><th>Significado</th><th>Acción</th></tr>
+<tr>
+<td><span class="badge badge-sc">CRÍTICO</span></td>
+<td>Permite ejecución de código remoto, robo de datos, o control total del servidor. Un atacante puede explotarlo desde internet sin credenciales.</td>
+<td>Arreglar <strong>inmediatamente</strong>. Si está expuesto a internet (🌐), es emergencia.</td>
+</tr>
+<tr>
+<td><span class="badge badge-sh">ALTO</span></td>
+<td>Permite ataques significativos pero con condiciones específicas: necesita acceso previo, interacción del usuario, o una configuración particular.</td>
+<td>Arreglar <strong>esta semana</strong>. Priorizar los expuestos a internet.</td>
+</tr>
+<tr>
+<td><span class="badge badge-sm">MEDIO</span></td>
+<td>Impacto limitado o requiere acceso local previo. Difícil de explotar remotamente.</td>
+<td>Arreglar <strong>cuando sea posible</strong>. No es urgente.</td>
+</tr>
+<tr>
+<td><span class="badge badge-sl">BAJO</span></td>
+<td>Impacto mínimo. Generalmente requiere acceso físico o condiciones muy específicas.</td>
+<td>Planificar para <strong>próximo ciclo</strong> de mantenimiento.</td>
+</tr>
+</table>
+</div>
+</section>
+
+<!-- 9. CONFLICTOS -->
+<section id="conflictos">
+<h2>⚠️ Tipos de conflicto</h2>
+<p>No todos los conflictos son iguales. Algunos son seguros de actualizar y otros pueden romper la aplicación. El dashboard clasifica cada conflicto por tipo y nivel de riesgo:</p>
+
+<h3>🟢 No toca código, no rompe nada — solo rebuild Docker</h3>
+<p>Estos paquetes son infraestructura pura. Actualizarlos no afecta al código de tu aplicación. Solo hay que reconstruir la imagen Docker.</p>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-sh">TLS/Cifrado</span></div>
+<p><strong>Paquetes:</strong> libssl3, libcrypto3, openssl, libssl-dev</p>
+<p><strong>Qué son:</strong> Librerías de cifrado que manejan HTTPS y conexiones seguras.</p>
+<p><strong>¿Afecta al código?</strong> No. Las actualizaciones de seguridad de OpenSSL son retrocompatibles.</p>
+<p><strong>¿Afecta a la infraestructura?</strong> No. El servicio sigue funcionando igual después del rebuild.</p>
+<p><strong>Cómo actualizar:</strong> <code>docker compose build --no-cache && docker compose up -d</code></p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-acc">Librería de imagen</span></div>
+<p><strong>Paquetes:</strong> curl, libcurl, libxml2, zlib, libexpat</p>
+<p><strong>Qué son:</strong> Librerías del sistema que vienen preinstaladas en la imagen Docker base.</p>
+<p><strong>¿Afecta al código?</strong> No. Son librerías internas que la app no importa directamente.</p>
+<p><strong>¿Afecta a la infraestructura?</strong> No. Son actualizaciones de seguridad sin cambios de funcionalidad.</p>
+<p><strong>Cómo actualizar:</strong> <code>docker compose build --no-cache && docker compose up -d</code> o <code>apk upgrade</code> / <code>apt upgrade</code></p>
+</div>
+
+<h3>🟡 Puede romper el código de la aplicación — probar en staging primero</h3>
+<p>Estos paquetes están conectados directamente con tu código. Si cambian su API o comportamiento, partes de la aplicación pueden dejar de funcionar.</p>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-sm">Dependencia de app</span></div>
+<p><strong>Paquetes:</strong> python3-pyasn1, python3-urllib3, jspdf, xgrammar</p>
+<p><strong>Qué son:</strong> Librerías que tu código importa directamente con <code>import</code> o <code>require()</code>.</p>
+<p><strong>¿Afecta al código?</strong> <strong style="color:var(--sc)">Sí.</strong> Si cambian una función que el código usa, la app se rompe. Ejemplo: si urllib3 cambia cómo maneja los timeouts, the HTTP calls of the app pueden fallar.</p>
+<p><strong>¿Afecta a la infraestructura?</strong> No directamente, pero la app puede dejar de funcionar.</p>
+<p><strong>Cómo actualizar:</strong> Cambiar la versión en <code>requirements.txt</code> o <code>package.json</code> → ejecutar tests → desplegar en staging → esperar 24h → si ok, pasar a prod.</p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-sh">Runtime</span></div>
+<p><strong>Paquetes:</strong> stdlib (Go), libpython3.9, libpython3.11</p>
+<p><strong>Qué son:</strong> El motor sobre el que se ejecuta todo el código. Go stdlib es el runtime de Go, libpython es el de Python.</p>
+<p><strong>¿Afecta al código?</strong> <strong style="color:var(--sc)">Puede.</strong> Una actualización del runtime puede cambiar el comportamiento de funciones estándar que el código usa. Es raro, pero cuando pasa es difícil de detectar.</p>
+<p><strong>¿Afecta a la infraestructura?</strong> No directamente, pero todos los servicios escritos en ese lenguaje se ven afectados.</p>
+<p><strong>Cómo actualizar:</strong> Cambiar la versión del runtime en el Dockerfile → recompilar todos los binarios → desplegar en staging → probar exhaustivamente → si ok, pasar a prod.</p>
+</div>
+
+<h3>🔴 Puede romper todo el contenedor — solo con rebuild completo de imagen base</h3>
+<p>Estos son los cimientos del sistema. Actualizarlos de forma aislada es como cambiar los cimientos de una casa sin tocar las paredes — todo se puede caer.</p>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-sc">Sistema base</span></div>
+<p><strong>Paquetes:</strong> libc-bin, libc6, libc6-compat, linux-libc-dev</p>
+<p><strong>Qué son:</strong> Las librerías fundamentales del sistema operativo. Absolutamente TODO dentro del contenedor depende de ellas — desde bash hasta Python, desde curl hasta nginx.</p>
+<p><strong>¿Afecta al código?</strong> No directamente.</p>
+<p><strong>¿Afecta a la infraestructura?</strong> <strong style="color:var(--sc)">Sí, gravemente.</strong> Actualizar solo libc6 sin actualizar el resto puede dejar el contenedor completamente inservible. Otros programas compilados contra la versión anterior pueden crashear.</p>
+<p><strong>Cómo actualizar:</strong> Actualizar la imagen base entera en el Dockerfile (ej: <code>FROM debian:11</code> → <code>FROM debian:12</code>) → rebuild completo → probar todo en staging → solo entonces pasar a prod.</p>
+<p><strong>Lo que NUNCA hay que hacer:</strong> <code>apt upgrade libc6</code> manualmente dentro de un contenedor en producción.</p>
+</div>
+
+<div class="note note-warn">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+<div><strong>Regla de oro:</strong> Siempre probar en staging antes de aplicar en producción. Incluso las actualizaciones de "riesgo bajo" pueden tener efectos inesperados en configuraciones específicas.</div>
+</div>
+</section>
+
+<!-- 10. EXPOSICIÓN -->
+<section id="exposicion">
+<h2>🌐 Exposición a internet</h2>
+<p>Las vulnerabilidades marcadas con 🌐 están en contenedores que son accesibles desde internet a través de nginx reverse proxy. Son las más urgentes porque cualquier persona en el mundo puede intentar explotarlas.</p>
+
+<h3>Servicios expuestos</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Dominio</th><th>Servicio</th><th>Máquina</th><th>Función</th></tr>
+<tr><td>api.example.com</td><td>your-api</td><td>your-host</td><td>API principal de la aplicación</td></tr>
+<tr><td>webhooks.example.com</td><td>your-webhooks</td><td>your-host</td><td>Recepción de webhooks (Stripe, etc.)</td></tr>
+<tr><td>supabase.example.com</td><td>kong-gateway</td><td>your-host</td><td>API gateway de Supabase</td></tr>
+<tr><td>workflows.example.com</td><td>activepieces</td><td>your-host</td><td>Automatización de flujos</td></tr>
+<tr><td>dashboard.example.com</td><td>dashboard</td><td>your-host</td><td>Dashboard interno</td></tr>
+<tr><td>registry.example.com</td><td>docker-registry</td><td>your-host</td><td>Registro de imágenes Docker</td></tr>
+</table>
+</div>
+
+<h3>Servicios NO expuestos (solo red interna)</h3>
+<p>Redis (6379), PostgreSQL (5431/5432), Qdrant (6333), Grafana, Prometheus, y los exporters solo son accesibles vía Tailscale VPN o red privada de AWS. Los security groups bloquean el acceso externo.</p>
+
+<div class="note note-danger">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+<div><strong>Prioridad absoluta:</strong> Una vulnerabilidad CRÍTICA + 🌐 es una emergencia. Significa que un atacante puede explotar esa vulnerabilidad directamente desde internet.</div>
+</div>
+</section>
+
+<!-- 11. DEPENDENCIAS -->
+<section id="dependencias">
+<h2>🔗 Dependencias reales</h2>
+<p>La sección "Paquetes dependientes" de cada vulnerabilidad muestra datos reales obtenidos directamente de cada contenedor — no estimaciones ni heurísticas.</p>
+
+<h3>¿Cómo se obtienen?</h3>
+<p>El script <code>trivy-deps.py</code> conecta por SSH a cada máquina, ejecuta <code>docker exec</code> en cada contenedor, y pregunta al package manager qué paquetes dependen del paquete vulnerable:</p>
+<div class="code">Debian/Ubuntu: dpkg-query → build_reverse_deps()
+Alpine: apk info --rdepends [paquete]</div>
+
+<h3>¿Qué significan?</h3>
+<p>Si libssl3 tiene dependientes [openssl, libcurl, libkrb5-3], significa que si actualizas libssl3, esos otros paquetes también pueden verse afectados. No significa que van a romperse — solo que dependen de él y hay que tenerlo en cuenta.</p>
+
+<h3>¿Por qué algunas no tienen dependencias?</h3>
+<p>Los paquetes "leaf" (hojas) como jspdf, xgrammar o paquetes npm no tienen otros paquetes que dependan de ellos dentro del contenedor. Son el final de la cadena de dependencias. Son los más seguros de actualizar.</p>
+</section>
+
+<!-- 12. IA -->
+<section id="ia">
+<h2>🤖 Análisis con IA</h2>
+<p>Cada vulnerabilidad tiene 3 campos generados por un LLM:</p>
+<div class="table-wrap">
+<table>
+<tr><th>Campo</th><th>Qué contiene</th></tr>
+<tr><td><strong>¿Qué es?</strong></td><td>Explicación sencilla de la vulnerabilidad: qué hace, cómo funciona el ataque, qué permite al atacante.</td></tr>
+<tr><td><strong>¿Por qué es grave?</strong></td><td>Impacto real en tu infraestructura: qué máquinas afecta, qué servicios están en riesgo, qué puede pasar.</td></tr>
+<tr><td><strong>¿Qué hacer?</strong></td><td>Pasos exactos: comandos, ficheros, servicios a reiniciar. Adaptado al entorno específico (Alpine/Debian/Docker).</td></tr>
+</table>
+</div>
+<p>La IA procesa las vulnerabilidades en batches de 10, con reintentos automáticos y guardado incremental. Si el proceso se interrumpe, el progreso nunca se pierde.</p>
+<p>Para las vulnerabilidades resueltas, la IA también se copia para que la pestaña "Resueltas" tenga la misma información.</p>
+</section>
+
+<!-- 13. MÁQUINAS -->
+<section id="maquinas">
+<h2>🖥️ Tu fleet</h2>
+<p>El dashboard se autoconfigura desde <code>reports/latest.json</code>. Cada máquina escaneada aparece con un color asignado automáticamente y el rol que definas en tu <code>inventory.json</code>. No hay máquinas hardcoded — añade o quita servidores y el dashboard se adapta tras el siguiente scan.</p>
+<p>Para personalizar el color y rol de una máquina, edita <code>MACHINE_DEFAULTS</code> en <code>dashboard/index.html</code> con tu propio mapeo:</p>
+<div class="code">const MACHINE_DEFAULTS = {
+  "tu-host-1": { role: "Producción", color: "#dc2645", icon: "🔴" },
+  "tu-host-2": { role: "Staging",    color: "#e05520", icon: "🟠" },
+};</div>
+</section>
+
+<!-- 14. CÓMO ACTUAR -->
+<section id="como-actuar">
+<h2>🎯 Cómo actuar ante una vulnerabilidad</h2>
+
+<h3>Paso 1: Evaluar la prioridad</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Condición</th><th>Prioridad</th><th>Plazo</th></tr>
+<tr><td>Crítico + 🌐 Expuesto + En producción</td><td><span class="badge badge-sc">EMERGENCIA</span></td><td>Hoy</td></tr>
+<tr><td>Crítico + 🌐 Expuesto</td><td><span class="badge badge-sc">MUY ALTA</span></td><td>24h</td></tr>
+<tr><td>Crítico sin exposición</td><td><span class="badge badge-sh">ALTA</span></td><td>Esta semana</td></tr>
+<tr><td>Alto + 🌐 Expuesto</td><td><span class="badge badge-sh">ALTA</span></td><td>Esta semana</td></tr>
+<tr><td>Alto sin exposición</td><td><span class="badge badge-sm">MEDIA</span></td><td>2 semanas</td></tr>
+<tr><td>Medio</td><td><span class="badge badge-sl">BAJA</span></td><td>Próximo ciclo</td></tr>
+</table>
+</div>
+
+<h3>Paso 2: Revisar el tipo de conflicto</h3>
+<p>Si la vulnerabilidad está en la pestaña Conflictos, revisa el tipo antes de actuar:</p>
+<p>🟢 <span class="badge badge-acc">Librería de imagen</span> o <span class="badge badge-sh">TLS/Cifrado</span> → <strong>No toca código ni infraestructura.</strong> Rebuild de imagen Docker y listo.</p>
+<p>🟡 <span class="badge badge-sh">Runtime</span> o <span class="badge badge-sm">Dependencia de app</span> → <strong>Puede romper el código de la app.</strong> Actualizar en staging, probar, esperar 24h, solo entonces prod.</p>
+<p>🔴 <span class="badge badge-sc">Sistema base</span> → <strong>Puede romper todo el contenedor.</strong> Solo con rebuild completo de la imagen base (cambiar FROM en Dockerfile).</p>
+
+<h3>Paso 3: Aplicar la actualización</h3>
+<p>Sigue los pasos de la sección "¿Qué hacer?" de la vulnerabilidad. Siempre:</p>
+<div class="code">1. Aplicar en staging primero
+2. Verificar que los servicios funcionan
+3. Esperar 24h monitorizando
+4. Aplicar en producción
+5. Verificar de nuevo</div>
+
+<h3>Paso 4: Verificar en el próximo scan</h3>
+<p>El domingo siguiente el scan detectará que la vulnerabilidad desapareció y la moverá a la pestaña "Resueltas" con badge verde.</p>
+</section>
+
+<!-- 15. AUTOMATIZACIÓN -->
+<section id="automatizacion">
+<h2>🔄 Automatización y cron</h2>
+<p>Sugerencia: corre el scan semanalmente vía cron en el host con acceso SSH a tu fleet:</p>
+<div class="code">crontab -e
+0 1 * * 0 /opt/socials-trivy/scripts/trivy-scan.sh >> /tmp/trivy-scan.log 2>&1</div>
+
+<h3>¿Qué ejecuta?</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Script</th><th>Función</th><th>Tiempo aprox.</th></tr>
+<tr><td>trivy-scan.sh</td><td>Escaneo + JSON + resolved + history + carry-over IA</td><td>~15 min</td></tr>
+<tr><td>trivy-enrich.py</td><td>Explicaciones IA (solo CVEs nuevos)</td><td>~2 min (si pocas nuevas)</td></tr>
+<tr><td>trivy-deps.py</td><td>Dependencias reales + clasificación + exposición</td><td>~5 min</td></tr>
+</table>
+</div>
+
+<h3>Logs</h3>
+<div class="code">tail -f /tmp/trivy-scan.log    # Scan principal
+tail -f /tmp/trivy-enrich.log  # Enrich con IA</div>
+</section>
+
+<!-- 16. AÑADIR MÁQUINA -->
+<section id="anadir-maquina">
+<h2>➕ Añadir una máquina nueva</h2>
+<p>Para añadir una nueva máquina al escaneo:</p>
+<div class="code">1. Añadir la máquina a inventory.json:
+   {"name": "nueva-maquina", "role": "descripción", "ssh": "ssh user@ip"}
+
+2. (Opcional) Personalizar color y rol en MACHINE_DEFAULTS de dashboard/index.html:
+   "nueva-maquina": { role: "Descripción", color: "#hexcolor", icon: "🔵" }
+
+3. Si tiene servicios expuestos, añadir a exposed.json
+
+4. El próximo scan la incluirá automáticamente — si no la añades a MACHINE_DEFAULTS,
+   el dashboard le asigna un color automáticamente.</div>
+</section>
+
+<!-- 17. GLOSARIO -->
+<section id="glosario">
+<h2>📖 Glosario</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Término</th><th>Significado</th></tr>
+<tr><td><strong>CVE</strong></td><td>Common Vulnerabilities and Exposures — identificador único mundial para cada vulnerabilidad conocida (ej: CVE-2025-15467)</td></tr>
+<tr><td><strong>Trivy</strong></td><td>Escáner de seguridad open-source de Aqua Security. Detecta vulnerabilidades en imágenes Docker, paquetes del SO, y dependencias</td></tr>
+<tr><td><strong>NVD</strong></td><td>National Vulnerability Database — base de datos oficial de EEUU con información técnica de cada CVE</td></tr>
+<tr><td><strong>CVSS</strong></td><td>Common Vulnerability Scoring System — sistema de puntuación de 0 a 10 que mide la gravedad de una vulnerabilidad</td></tr>
+<tr><td><strong>Severidad</strong></td><td>Nivel de gravedad: Crítico (CVSS 9.0-10.0), Alto (7.0-8.9), Medio (4.0-6.9), Bajo (0.1-3.9)</td></tr>
+<tr><td><strong>rdeps</strong></td><td>Reverse dependencies — paquetes que dependen de un paquete dado. Si actualizas X, los rdeps de X pueden verse afectados</td></tr>
+<tr><td><strong>Imagen base</strong></td><td>La imagen Docker sobre la que se construye un contenedor (ej: alpine:3.21, debian:12, ubuntu:24.04)</td></tr>
+<tr><td><strong>Compose</strong></td><td>Docker Compose — herramienta para definir y ejecutar aplicaciones multi-contenedor con un fichero YAML</td></tr>
+<tr><td><strong>VPN mesh</strong></td><td>Red privada (ej: Tailscale, WireGuard) que conecta las máquinas de tu fleet de forma segura</td></tr>
+<tr><td><strong>Security Group</strong></td><td>Firewall de AWS que controla qué puertos son accesibles desde internet</td></tr>
+<tr><td><strong>Reverse proxy</strong></td><td>Servidor (nginx) que recibe el tráfico de internet y lo redirige al contenedor correcto según el dominio</td></tr>
+<tr><td><strong>SOC</strong></td><td>Security Operations Center — centro de operaciones de seguridad que monitoriza la infraestructura 24/7</td></tr>
+<tr><td><strong>Enrich</strong></td><td>Proceso de añadir información adicional (explicaciones IA, dependencias) a los datos crudos del scan</td></tr>
+<tr><td><strong>Carry-over</strong></td><td>Proceso de copiar datos de IA del scan anterior al nuevo para no tener que regenerarlos</td></tr>
+</table>
+</div>
+</section>
+
+<div style="text-align:center;padding:40px 0;color:var(--tx3);font-size:12px">
+<p>Trivy Security — Dashboard SOC</p>
+<p style="margin-top:4px"><a href="/" style="color:var(--acc);text-decoration:none">← Volver al dashboard</a></p>
+</div>
+
+</div>
+
+<script>
+(function(){
+var btn=document.createElement('button');
+btn.className='scroll-top';
+btn.innerHTML='↑';
+btn.title='Subir';
+btn.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};
+document.body.appendChild(btn);
+window.addEventListener('scroll',function(){
+  btn.classList.toggle('show',window.scrollY>300);
+});
+})();
+</script>
+</body>
+</html>

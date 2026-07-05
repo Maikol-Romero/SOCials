@@ -1,0 +1,19 @@
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# Runtime
+config/logs/
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig

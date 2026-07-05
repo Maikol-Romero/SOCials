@@ -1,0 +1,29 @@
+[
+  {
+    "name": "node-1",
+    "role": "app",
+    "ip": "100.64.0.10",
+    "ssh": "ssh ubuntu@100.64.0.10",
+    "has_gpu": false,
+    "has_postgres": false,
+    "has_redis": true
+  },
+  {
+    "name": "node-2",
+    "role": "gpu-worker",
+    "ip": "100.64.0.11",
+    "ssh": "ssh ubuntu@100.64.0.11",
+    "has_gpu": true,
+    "has_postgres": false,
+    "has_redis": false
+  },
+  {
+    "name": "db-1",
+    "role": "postgres",
+    "ip": "100.64.0.20",
+    "ssh": "ssh ubuntu@100.64.0.20",
+    "has_gpu": false,
+    "has_postgres": true,
+    "has_redis": false
+  }
+]

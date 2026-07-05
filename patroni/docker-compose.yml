@@ -1,0 +1,68 @@
+version: "3.8"
+
+# Single-node Postgres deployment (no Patroni HA).
+# Use this when starting from scratch — switch to docker-compose.patroni.yml
+# once you have ≥2 nodes for HA.
+
+services:
+  postgres:
+    image: supabase/postgres:15.14.1.095
+    container_name: patroni-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - /mnt/db/data:/var/lib/postgresql/data:Z
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=5
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=6GB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - max_connections=200
+      - -c
+      - listen_addresses=*
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=/bin/true
+    shm_size: '2gb'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: patroni-pgbouncer
+    restart: unless-stopped
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./config/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./config/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

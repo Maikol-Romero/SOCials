@@ -1,0 +1,113 @@
+# Prometheus scrape config — TEMPLATE.
+#
+# Copy this to prometheus.yml and replace targets with the actual
+# IPs / DNS names of YOUR fleet. Common patterns:
+#
+#   - node-exporter:    <host-ip>:9100
+#   - cAdvisor:         <host-ip>:8080
+#   - postgres-exporter:<host-ip>:9187
+#   - redis-exporter:   <host-ip>:9121
+#   - blackbox HTTP:    use the soc-blackbox container as proxy (see api jobs below)
+#
+# Group jobs by host with consistent `instance` and `layer` labels — the
+# Grafana dashboards in this repo expect that schema.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ────────────────────────────────────────────────────────────────
+  # Self / monitor host
+  # ────────────────────────────────────────────────────────────────
+  - job_name: "prometheus_self"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          instance: "monitor-host"
+
+  - job_name: "monitor_node"
+    static_configs:
+      - targets: ["soc-node-exporter:9100"]
+        labels:
+          instance: "monitor-host"
+          layer: "infrastructure"
+
+  - job_name: "monitor_containers"
+    static_configs:
+      - targets: ["soc-cadvisor:8080"]
+        labels:
+          instance: "monitor-host"
+          layer: "containers"
+
+  - job_name: "tempo_metrics"
+    static_configs:
+      - targets: ["tempo:3200"]
+        labels:
+          instance: "monitor-host"
+          layer: "traces"
+
+  # ────────────────────────────────────────────────────────────────
+  # Per-host fleet jobs — repeat this block per machine you operate.
+  # The placeholder uses 10.20.0.10 — replace with each host's IP.
+  # ────────────────────────────────────────────────────────────────
+  - job_name: "host1_node"
+    static_configs:
+      - targets: ["10.20.0.10:9100"]
+        labels:
+          instance: "host-1"
+          layer: "infrastructure"
+
+  - job_name: "host1_containers"
+    static_configs:
+      - targets: ["10.20.0.10:8080"]
+        labels:
+          instance: "host-1"
+          layer: "containers"
+
+  # Postgres / Redis / GPU exporters — uncomment and aim at hosts that have them
+  # - job_name: "host1_postgres"
+  #   static_configs:
+  #     - targets: ["10.20.0.10:9187"]
+  #       labels:
+  #         instance: "host-1"
+  #         layer: "database"
+  #
+  # - job_name: "host1_redis"
+  #   static_configs:
+  #     - targets: ["10.20.0.10:9121"]
+  #       labels:
+  #         instance: "host-1"
+  #         layer: "cache"
+  #
+  # - job_name: "host1_gpu"
+  #   honor_timestamps: false
+  #   static_configs:
+  #     - targets: ["10.20.0.10:9400"]
+  #       labels:
+  #         instance: "host-1"
+  #         layer: "gpu"
+
+  # ────────────────────────────────────────────────────────────────
+  # HTTP healthchecks via blackbox-exporter (acts as a proxy).
+  # The relabel_configs trick rewrites __address__ so prometheus calls
+  # blackbox, which in turn probes the real URL captured in `instance_url`.
+  # ────────────────────────────────────────────────────────────────
+  - job_name: "host1_api"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["http://10.20.0.10:3000/v1/healthcheck"]
+        labels:
+          instance: "host-1"
+          container: "api"
+          layer: "api"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance_url
+      - target_label: __address__
+        replacement: soc-blackbox:9115

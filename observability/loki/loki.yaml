@@ -1,0 +1,51 @@
+# ============================================
+# Loki — Agregador de Logs
+# ============================================
+# Recibe logs vía OTLP HTTP desde el OTEL Collector de la fleet.
+# Almacena en filesystem local. Retención: 7 días.
+# Single-tenant (auth deshabilitado) — añadir auth si vas multi-tenant.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# Límites y configuración OTLP
+limits_config:
+  retention_period: 168h    # 7 días — ajustable según disco disponible
+  allow_structured_metadata: true
+  otlp_config:
+    resource_attributes:
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name            # Indexa por nombre de servicio (api, agent, etc.)
+            - deployment.environment   # Indexa por entorno (production, development)
+
+# Esquema de almacenamiento
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Compactación y limpieza automática
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem

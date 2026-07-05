@@ -1,0 +1,20 @@
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# Real inventory with hostnames / IPs — replace with example
+inventory.json
+!inventory.json.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+docker-compose.yml.pre-*

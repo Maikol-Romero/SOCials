@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Trivy Security</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.10/babel.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',system-ui,sans-serif;min-height:100vh;transition:background .18s ease,color .18s ease}
+body.light{--bg:#f8f9fc;--card:#fff;--card2:#f3f4f8;--brd:#e5e7ee;--brd2:#d1d5e0;--tx:#1a1c2e;--tx2:#5c5f78;--tx3:#9b9db3;--acc:#5558e6;--accbg:#5558e612;--shd:0 1px 3px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);--sc:#dc2645;--scb:#dc264510;--sh:#e05520;--shb:#e0552010;--sm:#b45309;--smb:#b4530910;--sl:#2d7dd2;--slb:#2d7dd210;--ok:#0d9668;--okb:#0d966810}
+body.dark{--bg:#0c0d12;--card:#14161e;--card2:#1a1d28;--brd:#22253a;--brd2:#2e3350;--tx:#f4f5f9;--tx2:#d4d7e5;--tx3:#9a9eb8;--acc:#6c72ff;--accbg:#6c72ff15;--shd:0 1px 3px rgba(0,0,0,.2),0 4px 16px rgba(0,0,0,.3);--sc:#ff3b5c;--scb:#ff3b5c18;--sh:#ff6b35;--shb:#ff6b3518;--sm:#ffb020;--smb:#ffb02018;--sl:#4d9fff;--slb:#4d9fff18;--ok:#34d399;--okb:#34d39918}
+body{background:var(--bg);color:var(--tx)}
+.wrap{max-width:1260px;margin:0 auto;padding:28px 20px}
+.hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;flex-wrap:wrap;gap:12px}
+.hdr h1{font-size:22px;font-weight:700;letter-spacing:-.4px;display:flex;align-items:center;gap:10px}
+.hdr h1 svg{color:var(--acc)}.hdr-sub{font-size:12px;color:var(--tx3);margin-top:3px}
+.hdr-r{display:flex;gap:8px;align-items:center}
+.btn-icon{width:36px;height:36px;border-radius:50%;background:var(--card);border:1px solid var(--brd);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--tx2);transition:all .18s ease}.btn-icon:hover{border-color:var(--acc);color:var(--acc)}
+.summary{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.sum-card{flex:1;min-width:120px;background:var(--card);border:1px solid var(--brd);border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:14px;transition:all .18s ease;animation:fu .3s ease both;cursor:pointer;user-select:none}
+.sum-card:hover{border-color:var(--brd2);transform:translateY(-1px)}.sum-card.active{border-color:var(--acc);box-shadow:0 0 0 2px var(--accbg)}
+.sum-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.sum-val{font-size:24px;font-weight:700;letter-spacing:-.5px}.sum-lbl{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.4px}
+@keyframes fu{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.chart-wrap{background:var(--card);border:1px solid var(--brd);border-radius:14px;margin-bottom:20px;overflow:hidden;transition:all .18s ease}
+.chart-hdr{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;cursor:pointer;user-select:none}
+.chart-hdr:hover{background:var(--card2)}
+.chart-title{font-size:13px;font-weight:600;color:var(--tx2);display:flex;align-items:center;gap:6px}
+.chart-body{padding:0 18px 18px;height:280px}
+.chart-footer{font-size:11px;color:var(--tx3);text-align:center;padding:0 18px 14px}
+.tabs{display:flex;gap:3px;background:var(--card);border:1px solid var(--brd);border-radius:14px;padding:3px;margin-bottom:18px;width:fit-content;flex-wrap:wrap}
+.tab{padding:8px 16px;border-radius:11px;border:none;background:transparent;color:var(--tx2);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .18s ease;white-space:nowrap}
+.tab:hover{color:var(--tx)}.tab.on{background:var(--acc);color:#fff}
+.tab-n{font-size:10px;padding:1px 6px;border-radius:20px;background:rgba(255,255,255,.2);font-weight:700}
+.tab:not(.on) .tab-n{background:var(--card2);color:var(--tx3)}
+.chips{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.chip{padding:5px 12px;border-radius:20px;border:1px solid var(--brd);background:transparent;font-family:inherit;font-size:12px;color:var(--tx2);cursor:pointer;transition:all .18s ease}
+.chip:hover{border-color:var(--acc)}.chip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.chip-clear{padding:5px 12px;border-radius:20px;border:1px solid var(--brd);background:var(--card2);font-family:inherit;font-size:11px;color:var(--tx3);cursor:pointer}
+.search-row{display:flex;gap:8px;margin-bottom:14px}
+.search{flex:1;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:0 12px;height:38px;transition:border .18s ease}
+.search:focus-within{border-color:var(--acc)}.search svg{color:var(--tx3);flex-shrink:0}
+.search input{flex:1;border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--tx)}.search input::placeholder{color:var(--tx3)}
+.machines{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.mcard{background:var(--card);border:1px solid var(--brd);border-radius:14px;padding:18px;cursor:pointer;transition:all .18s ease;animation:fu .3s ease both;position:relative;overflow:hidden}
+.mcard:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:var(--shd)}
+.mcard-dim{opacity:.45;cursor:default}.mcard-dim:hover{border-color:var(--brd);transform:none;box-shadow:none}
+.mcard-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.mcard-name{font-size:15px;font-weight:700}.mcard-role{font-size:11px;color:var(--tx3);margin-top:2px}
+.mcard-bar{display:flex;gap:8px;flex-wrap:wrap}
+.mcard-sev{font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px}
+.mcard-stripe{position:absolute;top:0;left:0;right:0;height:3px;border-radius:14px 14px 0 0}
+.back{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--tx2);cursor:pointer;margin-bottom:14px;padding:6px 0;border:none;background:none;font-family:inherit;transition:color .18s ease}.back:hover{color:var(--acc)}
+.count-txt{font-size:12px;color:var(--tx2);margin-bottom:10px;padding-left:2px}
+.vlist{display:flex;flex-direction:column;gap:6px}
+.vrow{background:var(--card);border:1px solid var(--brd);border-radius:14px;overflow:hidden;transition:all .18s ease;animation:fu .25s ease both}
+.vrow:hover{border-color:var(--brd2)}.vrow.open{border-color:var(--acc)}
+.vhdr{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;cursor:pointer;gap:12px}
+.vl{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.sev-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.3px;flex-shrink:0;text-transform:uppercase}
+.v-info{min-width:0}.v-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500}
+.v-title{font-size:12px;color:var(--tx);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}
+.vr{display:flex;align-items:center;gap:8px;flex-shrink:0;color:var(--tx3);flex-wrap:wrap}
+.v-pkg{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--tx2);font-family:'JetBrains Mono',monospace}
+.v-mtags{display:flex;gap:3px}.v-mtag{font-size:9px;padding:2px 7px;border-radius:20px;font-weight:600;color:#fff}
+.conflict-pill{display:flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;background:var(--smb);color:var(--sm)}
+.nofix-pill{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;background:var(--card2);color:var(--tx3)}
+.resolved-pill{display:flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;background:var(--okb);color:var(--ok)}
+.vdetail{border-top:1px solid var(--brd);padding:18px 16px;animation:fu .2s ease both}
+.ds{margin-bottom:18px}.ds:last-child{margin-bottom:0}
+.ds-t{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--tx3);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.ds-body{font-size:14px;line-height:1.65;color:var(--tx)}
+.ai-pending{font-size:13px;color:var(--tx2);font-style:italic;padding:10px 14px;background:var(--card2);border-radius:8px;border:1px dashed var(--brd)}
+.fix-box{padding:14px;border-radius:8px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;white-space:pre-wrap}
+.fix-box.safe{background:var(--okb);border:1px solid var(--ok);color:var(--ok);font-size:13px}
+.fix-box.warn{background:var(--smb);border:1px solid var(--sm);color:var(--sm)}
+.fix-box.nofix{background:var(--card2);border:1px solid var(--brd);color:var(--tx3)}
+.conflict-card{background:var(--card2);border:1px solid var(--brd);border-radius:8px;padding:14px;margin-top:8px}
+.cc-row{display:flex;gap:10px;margin-bottom:8px;align-items:flex-start}.cc-row:last-child{margin-bottom:0}
+.cc-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;min-width:120px;flex-shrink:0}
+.cc-label.red{color:var(--sc)}.cc-label.orange{color:var(--sh)}.cc-label.blue{color:var(--sl)}.cc-label.green{color:var(--ok)}
+.cc-val{font-size:13px;color:var(--tx);line-height:1.5}
+.ver-row{display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
+.ver-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--tx2)}
+.ver-val{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:500;margin-top:2px}
+.ver-old{color:var(--sc)}.ver-new{color:var(--ok)}.ver-none{color:var(--tx3);font-style:italic}
+.img-list{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.img-tag{font-size:11px;padding:3px 8px;border-radius:5px;background:var(--card2);font-family:'JetBrains Mono',monospace;color:var(--tx2);border:1px solid var(--brd)}
+.dep-list{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.dep-tag{font-size:11px;padding:3px 8px;border-radius:5px;background:var(--accbg);color:var(--acc);font-family:'JetBrains Mono',monospace}
+.detail-link{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--acc);text-decoration:none;font-weight:500;margin-top:12px}.detail-link:hover{opacity:.7}
+.tip-wrap{position:relative;display:inline-flex;align-items:center}
+.tip-bubble{position:absolute;z-index:100;background:var(--tx);color:var(--bg);padding:8px 12px;border-radius:8px;font-size:11px;line-height:1.5;max-width:280px;width:max-content;pointer-events:none;white-space:normal;box-shadow:0 4px 12px rgba(0,0,0,.15);bottom:100%;left:0;margin-bottom:6px}
+.info-dot{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;color:var(--tx3);cursor:help;transition:color .18s ease}.info-dot:hover{color:var(--acc)}
+.empty{text-align:center;padding:60px 20px;color:var(--tx3)}.empty svg{margin-bottom:10px;opacity:.3}.empty p{font-size:13px}
+.sentinel{height:1px}
+@media(max-width:768px){.machines{grid-template-columns:1fr}.vhdr{flex-direction:column;align-items:flex-start}.vr{flex-wrap:wrap}.v-title{max-width:240px}.summary{flex-direction:column}.tabs{flex-wrap:wrap}.ver-row{flex-direction:column;gap:8px}.cc-row{flex-direction:column;gap:4px}.cc-label{min-width:auto}}
+
+.scroll-top{position:fixed;bottom:24px;right:24px;width:42px;height:42px;border-radius:50%;background:var(--acc);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.2);opacity:0;pointer-events:none;transition:all .25s ease;z-index:999;font-size:18px}
+.scroll-top.show{opacity:1;pointer-events:auto}
+.scroll-top:hover{transform:scale(1.1);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+
+.banner{background:var(--accbg);border:1px solid var(--acc);border-radius:14px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px;animation:fu .3s ease both;position:relative}
+.banner-body{flex:1;font-size:16px;color:var(--tx);line-height:1.6}
+.banner-title{font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--acc);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.banner-close{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--tx3);cursor:pointer;padding:4px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all .18s}.banner-close:hover{color:var(--sc);background:var(--scb)}
+.banner-stats{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}
+.banner-stat{font-size:14px;color:var(--tx3)}
+.banner-stat b{color:var(--tx);font-weight:700;font-size:16px}
+</style>
+</head>
+<body class="light">
+<div id="app"></div>
+<script type="text/babel">
+const {useState,useMemo,useEffect,useRef,useCallback}=React;
+const esc=(s)=>!s?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const IC={Shield:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,Alert:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,Info:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,Check:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,Search:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,X:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,Down:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>,Right:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>,Pkg:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>,Ext:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>,Moon:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>,Sun:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>,Wrench:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>,Back:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,Server:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>,Link:({s=16})=><svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>};
+const MACHINE_DEFAULTS={};const AUTO_COLORS=["#e84393","#00b894","#fdcb6e","#0984e3","#6c5ce7","#d63031"];let MACHINES={...MACHINE_DEFAULTS};function updateMachines(scanned){if(!scanned)return;MACHINES={...MACHINE_DEFAULTS};scanned.forEach((n,i)=>{if(!MACHINES[n])MACHINES[n]={role:"Servidor",color:AUTO_COLORS[i%AUTO_COLORS.length],icon:"🖥️"}});}
+const SEV={CRITICAL:{color:'var(--sc)',bg:'var(--scb)',label:'Crítico'},HIGH:{color:'var(--sh)',bg:'var(--shb)',label:'Alto'},MEDIUM:{color:'var(--sm)',bg:'var(--smb)',label:'Medio'},LOW:{color:'var(--sl)',bg:'var(--slb)',label:'Bajo'}};
+const SEVORD={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+function Tip({text,children}){const[show,setShow]=useState(false);return <span className="tip-wrap" onMouseEnter={()=>setShow(true)} onMouseLeave={()=>setShow(false)}>{children}{show&&text&&<span className="tip-bubble">{text}</span>}</span>}
+function InfoDot({text}){return <Tip text={text}><span className="info-dot"><IC.Info s={13}/></span></Tip>}
+
+function TrendChart({history,chartSev,onSevClick}){
+const canvasRef=useRef(null);const chartRef=useRef(null);
+const SK=[null,'CRITICAL','HIGH','MEDIUM'];
+useEffect(()=>{
+if(!canvasRef.current||!history||!history.length)return;
+if(chartRef.current)chartRef.current.destroy();
+const labels=history.map(h=>new Date(h.date).toLocaleDateString('es-ES',{day:'2-digit',month:'short'}));
+const dk=document.body.classList.contains('dark');
+const gc=dk?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',tc=dk?'#8b8fa3':'#5c5f78';
+const ds=[
+{label:'Total',data:history.map(h=>h.total),borderColor:'#6c72ff',backgroundColor:'#6c72ff18',fill:true,tension:.3,pointStyle:'circle',yAxisID:'y'},
+{label:'Críticos',data:history.map(h=>h.critical),borderColor:'#ef4444',backgroundColor:'#ef444418',fill:false,tension:.3,pointStyle:'rectRot',yAxisID:'y1'},
+{label:'Altos',data:history.map(h=>h.high),borderColor:'#f97316',backgroundColor:'#f9731618',fill:false,tension:.3,pointStyle:'triangle',yAxisID:'y'},
+{label:'Medios',data:history.map(h=>h.medium),borderColor:'#eab308',backgroundColor:'#eab30818',fill:false,tension:.3,borderDash:[6,3],pointStyle:'rect',yAxisID:'y1'}];
+ds.forEach((d,i)=>{const on=!chartSev||SK[i]===chartSev||chartSev==='ALL';d.borderWidth=on?(i?2.5:3):1;d.pointRadius=on?5:2;if(!on){d.borderColor=d.borderColor.slice(0,7)+'40';d.backgroundColor='transparent'}});
+chartRef.current=new Chart(canvasRef.current,{type:'line',data:{labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,interaction:{intersect:false,mode:'index'},
+onHover:(e,els,ch)=>{if(els.length){const hi=els[0].datasetIndex;ch.data.datasets.forEach((d,i)=>{d.borderWidth=i===hi?(i?3.5:4):1;d.pointRadius=i===hi?6:2});ch.update('none')}else{ch.data.datasets.forEach((d,i)=>{const on=!chartSev||SK[i]===chartSev||chartSev==='ALL';d.borderWidth=on?(i?2.5:3):1;d.pointRadius=on?5:2});ch.update('none')}},
+onClick:(e,els)=>{if(els.length)onSevClick(SK[els[0].datasetIndex])},
+plugins:{legend:{position:'top',labels:{color:tc,font:{family:'DM Sans',size:12,weight:'500'},usePointStyle:true,padding:20},onClick:(e,item)=>onSevClick(SK[item.datasetIndex])},
+tooltip:{backgroundColor:dk?'#1a1d28':'#fff',titleColor:dk?'#e6e8f0':'#1a1c2e',bodyColor:dk?'#8b8fa3':'#5c5f78',borderColor:dk?'#22253a':'#e5e7ee',borderWidth:1,padding:12,cornerRadius:8,titleFont:{family:'DM Sans',weight:'600'},bodyFont:{family:'DM Sans'},callbacks:{title:i=>i[0]?.label||'',label:c=>' '+c.dataset.label+': '+c.parsed.y}}},
+scales:{x:{grid:{color:gc},ticks:{color:tc,font:{family:'DM Sans',size:11}}},y:{type:'linear',position:'left',beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{family:'DM Sans',size:11}},title:{display:true,text:'Total / Altos',color:tc,font:{family:'DM Sans',size:11}}},y1:{type:'linear',position:'right',beginAtZero:true,grid:{drawOnChartArea:false},ticks:{color:tc,font:{family:'DM Sans',size:11}},title:{display:true,text:'Críticos / Medios',color:tc,font:{family:'DM Sans',size:11}}}},
+animation:{duration:600,easing:'easeOutQuart'}}});
+return()=>{if(chartRef.current)chartRef.current.destroy()};
+},[history,chartSev]);
+if(!history||!history.length)return null;
+return <div style={{height:280}}><canvas ref={canvasRef}/></div>;
+}
+
+function VulnRow({v,isOpen,onToggle,data}){
+const s=SEV[v.severity]||SEV.MEDIUM;
+const rowRef=useRef(null);
+useEffect(()=>{if(isOpen&&rowRef.current)setTimeout(()=>rowRef.current.scrollIntoView({behavior:'smooth',block:'start'}),100)},[isOpen]);
+return <div ref={rowRef} className={'vrow'+(isOpen?' open':'')}>
+<div className="vhdr" onClick={onToggle}><div className="vl"><div className="sev-badge" style={{background:s.bg,color:s.color}}>{s.label}</div>{v.exposed&&<span title={v.exposedDomains?v.exposedDomains.join(', '):'Expuesto a internet'} style={{fontSize:11,padding:'2px 7px',borderRadius:20,background:'var(--scb)',color:'var(--sc)',fontWeight:700,display:'inline-flex',alignItems:'center',gap:3,cursor:'help'}}>🌐</span>}<div className="v-info"><div className="v-id">{esc(v.id)}</div><div className="v-title">{esc(v.title)}</div></div></div>
+<div className="vr"><div className="v-pkg"><IC.Pkg s={12}/> {esc(v.pkg)}</div>{v.hasConflict&&<div className="conflict-pill"><IC.Alert s={10}/> {v.conflictType?v.conflictType.label:'Conflicto'}</div>}{!v.fixed&&!v.resolved_date&&<div className="nofix-pill">Sin solución</div>}{v.resolved_date&&<div className="resolved-pill"><IC.Check s={10}/> {v.resolved_date.slice(0,10)}</div>}<div className="v-mtags">{(v.machines||[]).map(m=><span key={m} className="v-mtag" style={{background:MACHINES[m]?.color||'#666'}}>{m}</span>)}</div>{isOpen?<IC.Down s={14}/>:<IC.Right s={14}/>}</div></div>
+{isOpen&&<div className="vdetail">
+<div className="ds"><div className="ds-t"><IC.Info s={13}/> ¿Qué es esta vulnerabilidad? <InfoDot text="Explicación de qué hace esta vulnerabilidad."/></div>{v.what?<div className="ds-body">{v.what}</div>:<div className="ai-pending">Análisis AI pendiente — se generará en el próximo escaneo</div>}</div>
+<div className="ds"><div className="ds-t"><IC.Alert s={13}/> ¿Por qué es {s.label.toLowerCase()}? <InfoDot text={'Impacto real con severidad "'+s.label+'".'}/></div>{v.why?<div className="ds-body">{v.why}</div>:<div className="ai-pending">Análisis AI pendiente — se generará en el próximo escaneo</div>}</div>
+<div className="ds"><div className="ds-t"><IC.Pkg s={13}/> Paquete afectado <InfoDot text="Paquete vulnerable con versión actual y corregida."/></div><div className="ver-row"><div><div className="ver-lbl">Paquete</div><div className="ver-val">{esc(v.pkg)}</div></div><div><div className="ver-lbl">Fuente</div><div className="ver-val">{v.source==='docker'?'Imagen Docker':'Sistema operativo'}</div></div><div><div className="ver-lbl">Versión actual</div><div className="ver-val ver-old">{esc(v.installed)}</div></div><div><div className="ver-lbl">Versión corregida</div><div className={'ver-val '+(v.fixed?'ver-new':'ver-none')}>{v.fixed?esc(v.fixed):'Sin solución aún'}</div></div></div></div>
+<div className="ds"><div className="ds-t"><IC.Server s={13}/> ¿Dónde afecta? <InfoDot text="Máquinas, imágenes y ruta del compose."/></div>
+{v.exposed&&<div style={{fontSize:11,padding:'8px 12px',borderRadius:8,background:'var(--scb)',border:'1px solid var(--sc)',color:'var(--sc)',marginBottom:10,display:'flex',alignItems:'center',gap:6}}>🌐 <strong>Expuesto a internet</strong>{v.exposedDomains&&<span style={{marginLeft:4}}>via {v.exposedDomains.join(', ')}</span>}</div>}<div style={{fontSize:12,color:'var(--tx2)',marginBottom:6}}>{(v.machines||[]).map(m=>{const imgs=v.machine_images&&v.machine_images[m]||[];const info=data?.image_info||{};return <div key={m} style={{marginBottom:8}}><span style={{fontWeight:600,color:MACHINES[m]?.color||'var(--tx)'}}>{m}</span>{imgs.length>0&&<div className="img-list">{imgs.map(img=>{const meta=info[m+':'+img];return <Tip key={img} text={meta?meta.path+' → servicio: '+meta.service:''}><span className="img-tag">{esc(img)}{meta&&meta.service&&<span style={{color:'var(--tx3)',marginLeft:4}}>({meta.service})</span>}</span></Tip>})}</div>}</div>})}</div></div>
+{v.dependsOn&&v.dependsOn.length>0&&<div className="ds"><div className="ds-t"><IC.Link s={13}/> Paquetes dependientes <InfoDot text="Si actualizamos, estos pueden verse afectados."/></div><div className="dep-list">{v.dependsOn.map(d=><span key={d} className="dep-tag">{esc(d)}</span>)}</div></div>}
+{v.hasConflict&&v.conflictDetail&&<div className="ds"><div className="ds-t"><IC.Alert s={13}/> Conflicto de actualización <InfoDot text="Riesgo si actualizamos."/></div><div className="conflict-card">{v.conflictType&&<div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}><span style={{fontSize:10,fontWeight:700,padding:'3px 10px',borderRadius:6,background:v.conflictType.risk==='alto'?'var(--scb)':v.conflictType.risk==='medio'?'var(--shb)':'var(--accbg)',color:v.conflictType.risk==='alto'?'var(--sc)':v.conflictType.risk==='medio'?'var(--sh)':'var(--acc)',textTransform:'uppercase',letterSpacing:'.3px'}}>{v.conflictType.label}</span><span style={{fontSize:10,fontWeight:700,padding:'3px 10px',borderRadius:6,background:v.conflictType.risk==='alto'?'var(--scb)':v.conflictType.risk==='medio'?'var(--smb)':'var(--okb)',color:v.conflictType.risk==='alto'?'var(--sc)':v.conflictType.risk==='medio'?'var(--sm)':'var(--ok)',textTransform:'uppercase',letterSpacing:'.3px'}}>Riesgo {v.conflictType.risk}</span></div>}<div className="cc-row"><div className="cc-label red">Problema</div><div className="cc-val">{esc(v.conflictDetail.problem)}</div></div><div className="cc-row"><div className="cc-label orange">Situación actual</div><div className="cc-val">{esc(v.conflictDetail.current)}</div></div><div className="cc-row"><div className="cc-label blue">Qué pasa si actualizas</div><div className="cc-val">{esc(v.conflictDetail.consequence)}</div></div><div className="cc-row"><div className="cc-label green">Recomendación</div><div className="cc-val">{esc(v.conflictDetail.recommendation)}</div></div></div></div>}
+<div className="ds"><div className="ds-t"><IC.Wrench s={13}/> ¿Qué hacer? <InfoDot text="Pasos para arreglar."/></div>{v.howToFix?<div className={'fix-box '+(v.hasConflict?'warn':!v.fixed?'nofix':'safe')}>{v.howToFix}</div>:v.fixed?<div className="fix-box safe">Actualizar {esc(v.pkg)} de {esc(v.installed)} a {esc(v.fixed)}</div>:<div className="fix-box nofix">Sin solución disponible. Monitorizar actualizaciones del proveedor.</div>}</div>
+{v.resolved_date&&<div className="ds"><div className="ds-t"><IC.Check s={13}/> Resuelta</div><div className="fix-box safe">Desapareció del escaneo del {v.resolved_date.slice(0,10)}. El paquete se actualizó o la imagen fue reemplazada.</div></div>}
+<a className="detail-link" href={'https://nvd.nist.gov/vuln/detail/'+encodeURIComponent(v.id)} target="_blank" rel="noopener noreferrer"><IC.Ext s={12}/> Más información (NVD)</a>
+</div>}
+</div>;}
+
+function App(){
+const[dark,setDark]=useState(false);const[data,setData]=useState(null);const[loading,setLoading]=useState(true);
+const[tab,setTab]=useState(null);const[search,setSearch]=useState('');const[sevFilter,setSevFilter]=useState([]);
+const[chartSev,setChartSev]=useState(null);const[expandedId,setExpandedId]=useState(null);const[selMachine,setSelMachine]=useState(null);
+const[docsOpen,setDocsOpen]=useState(false);const[resolved,setResolved]=useState([]);const[history,setHistory]=useState([]);
+const[chartOpen,setChartOpen]=useState(true);
+const[summary,setSummary]=useState(null);
+const[bannerDismissed,setBannerDismissed]=useState(()=>{try{const d=window.sessionStorage?.getItem('trivy-banner-v3');return d||''}catch(e){return ''}});const[visibleCount,setVisibleCount]=useState(50);const sentinelRef=useRef(null);
+
+useEffect(()=>{const h=window.location.hash.slice(1);if(!h)return;try{const p=h.split('?');const seg=p[0].split('/');const qs=new URLSearchParams(p[1]||'');
+if(['action','monitor','conflicts','resolved'].includes(seg[0])){setTab(seg[0]);setChartOpen(false)}
+else if(seg[0]==='machines'){setTab('machines');if(seg[1]&&MACHINES[seg[1]])setSelMachine(seg[1]);setChartOpen(false)}
+else if(seg[0]==='sev'&&seg[1]){const sv=seg[1];setChartSev(sv);if(sv!=='ALL')setSevFilter([sv])}
+if(qs.get('cve'))setExpandedId(decodeURIComponent(qs.get('cve')));
+if(qs.get('chart')==='0')setChartOpen(false);
+}catch(e){}},[]); 
+
+useEffect(()=>{let h='';const qs=[];
+if(tab==='machines'&&selMachine)h='machines/'+selMachine;
+else if(tab)h=tab;
+else if(chartSev)h='sev/'+chartSev;
+if(expandedId)qs.push('cve='+encodeURIComponent(expandedId));
+if(!chartOpen)qs.push('chart=0');
+const full=h+(qs.length?'?'+qs.join('&'):'');
+if(full)window.location.hash=full;else if(window.location.hash)window.history.replaceState(null,null,' ');
+},[tab,selMachine,chartSev,expandedId,chartOpen]);
+
+useEffect(()=>{document.body.className=dark?'dark':'light'},[dark]);
+useEffect(()=>{fetch('/api/resolved.json').then(r=>r.json()).then(d=>setResolved(d)).catch(()=>{})},[]);
+useEffect(()=>{fetch('/api/history.json').then(r=>r.json()).then(d=>setHistory(d)).catch(()=>{})},[]);
+useEffect(()=>{fetch('/api/exposed.json').then(r=>r.json()).then(d=>{}).catch(()=>{})},[]);
+useEffect(()=>{fetch('/api/summary.json').then(r=>r.json()).then(d=>setSummary(d)).catch(()=>{})},[]);
+useEffect(()=>{fetch('/api/latest.json').then(r=>r.json()).then(d=>{updateMachines(d.machines_scanned);setData(d);setLoading(false)}).catch(()=>setLoading(false))},[]);
+useEffect(()=>{if(!sentinelRef.current)return;const obs=new IntersectionObserver(e=>{if(e[0].isIntersecting)setVisibleCount(p=>p+50)},{rootMargin:'200px'});obs.observe(sentinelRef.current);return()=>obs.disconnect()});
+
+const vulns=data?.vulnerabilities||[];const vulnsFor=m=>vulns.filter(v=>(v.machines||[]).includes(m));
+const actionVulns=vulns.filter(v=>v.fixed);const monitorVulns=vulns.filter(v=>!v.fixed);const conflictVulns=vulns.filter(v=>v.hasConflict);
+
+const currentList=useMemo(()=>{let list=[];
+if(tab==='machines'&&selMachine)list=vulnsFor(selMachine);
+else if(tab==='action')list=actionVulns;else if(tab==='monitor')list=monitorVulns;
+else if(tab==='conflicts')list=conflictVulns;else if(tab==='resolved')list=resolved;
+else if(!tab&&chartSev==='ALL')list=vulns;else if(!tab&&chartSev)list=vulns;
+else return [];
+if(search){const q=search.toLowerCase();list=list.filter(v=>v.id?.toLowerCase().includes(q)||v.pkg?.toLowerCase().includes(q)||v.title?.toLowerCase().includes(q))}
+if(sevFilter.length)list=list.filter(v=>sevFilter.includes(v.severity));
+return list.sort((a,b)=>{const s=(SEVORD[a.severity]||3)-(SEVORD[b.severity]||3);if(s!==0)return s;if(a.exposed&&!b.exposed)return -1;if(!a.exposed&&b.exposed)return 1;return 0;});
+},[tab,selMachine,search,sevFilter,vulns,resolved,chartSev]);
+
+const visibleList=currentList.slice(0,visibleCount);
+const resetList=()=>{setSearch('');setExpandedId(null);setVisibleCount(50)};
+
+const handleCardClick=(k)=>{if(chartSev===k){setChartSev(null);setSevFilter([]);if(!tab)resetList()}else{setTab(null);setSelMachine(null);setChartSev(k);setSevFilter(k==='ALL'?[]:[k]);resetList();setChartOpen(true)}};
+const handleChartClick=(sk)=>{const k=sk===null?'ALL':sk;handleCardClick(k)};
+const handleTabClick=(t)=>{if(tab===t){setTab(null);resetList();return}setTab(t);setSelMachine(null);setSevFilter([]);setChartSev(null);resetList();setChartOpen(false)};
+
+const TABS=[{id:'machines',label:'Máquinas',n:Object.keys(MACHINES).length,tip:'Vista por servidor.'},{id:'action',label:'Actuar',n:actionVulns.length,tip:'Con solución disponible.'},{id:'monitor',label:'Monitorizar',n:monitorVulns.length,tip:'Sin solución disponible.'},{id:'conflicts',label:'Conflictos',n:conflictVulns.length,tip:'Solución puede romper cosas.'},{id:'resolved',label:'Resueltas',n:resolved.length,tip:'Ya no aparecen en el último escaneo.'}];
+
+if(loading)return <div className="wrap"><div className="empty"><IC.Shield s={40}/><p>Cargando datos...</p></div></div>;
+if(!data)return <div className="wrap"><div className="empty"><IC.Alert s={40}/><p>Error cargando datos</p></div></div>;
+
+const showList=currentList.length>0;
+const CARDS=[{v:data.critical||0,l:'Críticos',c:'var(--sc)',k:'CRITICAL'},{v:data.high||0,l:'Altos',c:'var(--sh)',k:'HIGH'},{v:data.medium||0,l:'Medios',c:'var(--sm)',k:'MEDIUM'},{v:data.total||0,l:'Total',c:'var(--acc)',k:'ALL'}];
+const sevLabels={CRITICAL:'Críticos',HIGH:'Altos',MEDIUM:'Medios',ALL:'Todas'};
+
+return <div className="wrap">
+<div className="hdr"><div><h1><IC.Shield s={22}/> Trivy Security</h1><div className="hdr-sub">Último escaneo: {new Date(data.timestamp).toLocaleString('es-ES',{dateStyle:'long',timeStyle:'short'})} · {data.machines_scanned?.length||0} máquinas · {data.total||0} vulnerabilidades</div></div><div className="hdr-r"><a href="/docs.html" className="btn-icon" title="Documentación" style={{textDecoration:'none'}}><IC.Info s={15}/></a><button className="btn-icon" onClick={()=>setDark(!dark)}>{dark?<IC.Sun s={15}/>:<IC.Moon s={15}/>}</button></div></div>
+
+<div className="summary">{CARDS.map((s,i)=><div className={'sum-card'+(chartSev===s.k?' active':'')} key={i} style={{animationDelay:i*50+'ms'}} onClick={()=>handleCardClick(s.k)}><div className="sum-dot" style={{background:s.c}}/><div><div className="sum-val">{s.v}</div><div className="sum-lbl">{s.l}</div></div></div>)}</div>
+
+{summary&&summary.summary&&bannerDismissed!==summary.date&&<div className="banner">
+<div className="banner-body">
+<div className="banner-title">📋 Resumen semanal — {summary.date}</div>
+<div style={{marginBottom:10}}>{summary.summary}</div>
+<div className="banner-stats">
+<div className="banner-stat"><b>{summary.total}</b> total {summary.diff_total!==0&&<span style={{color:summary.diff_total>0?'var(--sc)':'var(--ok)'}}> ({summary.diff_total>0?'+':''}{summary.diff_total})</span>}</div>
+<div className="banner-stat" style={{color:'var(--sc)'}}><b>{summary.critical}</b> críticos {summary.diff_critical!==0&&<span> ({summary.diff_critical>0?'+':''}{summary.diff_critical})</span>}</div>
+<div className="banner-stat">🌐 <b>{summary.exposed}</b> expuestos</div>
+<div className="banner-stat" style={{color:'var(--ok)'}}><b>{summary.actionable||0}</b> actualizables</div>
+<div className="banner-stat"><b>{summary.no_fix||0}</b> sin solución</div>
+<div className="banner-stat"><b>{summary.conflicts}</b> conflictos</div>
+</div>
+{summary.resolved>0&&<div style={{marginTop:8,fontSize:13,color:'var(--ok)'}}>✅ Resueltas: {summary.resolved_details?.map(r=>r.pkg).join(', ')||summary.resolved}</div>}
+{summary.exposed_crit_pkgs?.length>0&&<div style={{marginTop:4,fontSize:13,color:'var(--sc)'}}>🔴 Prioridad: {summary.exposed_crit_pkgs.join(', ')} (críticos + expuestos)</div>}
+{summary.resolved===0&&<div style={{marginTop:4,fontSize:13,color:'var(--tx3)'}}>No se resolvió ninguna vulnerabilidad esta semana.</div>}
+</div>
+<button className="banner-close" onClick={()=>{setBannerDismissed(summary.date);try{window.sessionStorage?.setItem('trivy-banner-v3',summary.date)}catch(e){}}} title="Cerrar"><IC.X s={14}/></button>
+</div>}
+
+{history.length>0&&<div className="chart-wrap">
+<div className="chart-hdr" onClick={()=>setChartOpen(!chartOpen)}><div className="chart-title"><IC.Info s={13}/> Tendencia {chartSev&&<span style={{color:'var(--acc)',fontWeight:700}}>— {sevLabels[chartSev]||chartSev}</span>}</div>{chartOpen?<IC.Down s={14}/>:<IC.Right s={14}/>}</div>
+{chartOpen&&<><div className="chart-body"><TrendChart history={history} chartSev={chartSev} onSevClick={handleChartClick}/></div><div className="chart-footer">{history.length} escaneos · Desde {new Date(history[0].date).toLocaleDateString('es-ES',{dateStyle:'long'})}</div></>}
+</div>}
+
+{!tab&&chartSev&&<div style={{marginBottom:14}}><button className="back" onClick={()=>{setChartSev(null);setSevFilter([]);setVisibleCount(50)}}><IC.Back s={15}/> Limpiar filtro</button></div>}
+
+<div className="tabs">{TABS.map(t=><Tip key={t.id} text={t.tip}><button className={'tab'+(tab===t.id?' on':'')} onClick={()=>handleTabClick(t.id)}>{t.label}<span className="tab-n">{t.n}</span></button></Tip>)}</div>
+
+{((tab&&tab!=='machines')||(tab==='machines'&&selMachine))&&<div className="chips">{['CRITICAL','HIGH','MEDIUM'].map(s=><button key={s} className={'chip'+(sevFilter.includes(s)?' on':'')} onClick={()=>{setSevFilter(p=>p.includes(s)?p.filter(x=>x!==s):[...p,s]);setVisibleCount(50)}}>{SEV[s].label}</button>)}{sevFilter.length>0&&<button className="chip-clear" onClick={()=>{setSevFilter([]);setVisibleCount(50)}}>Limpiar</button>}</div>}
+
+{tab==='machines'&&!selMachine&&<div className="machines">{Object.entries(MACHINES).map(([name,m],i)=>{const mv=vulnsFor(name);const mc=mv.filter(v=>v.severity==='CRITICAL').length;const mh=mv.filter(v=>v.severity==='HIGH').length;const mm=mv.filter(v=>v.severity==='MEDIUM').length;const sc=data.machines_scanned?.includes(name);return <div className={'mcard'+(sc?'':' mcard-dim')} key={name} style={{animationDelay:i*60+'ms'}} onClick={()=>sc&&setSelMachine(name)}><div className="mcard-stripe" style={{background:m.color}}/><div className="mcard-top"><div><div className="mcard-name">{name}</div><div className="mcard-role">{m.role}</div></div><div style={{fontSize:20}}>{m.icon}</div></div><div className="mcard-bar">{!sc&&<div className="mcard-sev" style={{background:'var(--card2)',color:'var(--tx3)'}}>No escaneada</div>}{sc&&mc>0&&<div className="mcard-sev" style={{background:'var(--scb)',color:'var(--sc)'}}>{mc} críticos</div>}{sc&&mh>0&&<div className="mcard-sev" style={{background:'var(--shb)',color:'var(--sh)'}}>{mh} altos</div>}{sc&&mm>0&&<div className="mcard-sev" style={{background:'var(--smb)',color:'var(--sm)'}}>{mm} medios</div>}{sc&&mv.length===0&&<div className="mcard-sev" style={{background:'var(--okb)',color:'var(--ok)'}}>Limpia</div>}</div></div>})}</div>}
+
+{tab==='machines'&&selMachine&&<><button className="back" onClick={()=>{setSelMachine(null);setSevFilter([]);resetList()}}><IC.Back s={15}/> Volver a máquinas</button><div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}><span style={{fontSize:20}}>{MACHINES[selMachine]?.icon}</span><div><div style={{fontWeight:700,fontSize:16}}>{selMachine}</div><div style={{fontSize:12,color:'var(--tx3)'}}>{MACHINES[selMachine]?.role} · {vulnsFor(selMachine).length} vulnerabilidades</div></div></div></>}
+
+{showList&&<><div className="search-row"><div className="search"><IC.Search s={14}/><input placeholder="Buscar por CVE, paquete o descripción..." value={search} onChange={e=>{setSearch(e.target.value);setVisibleCount(50)}}/>{search&&<span style={{cursor:'pointer',color:'var(--tx3)',display:'flex'}} onClick={()=>setSearch('')}><IC.X s={13}/></span>}</div></div>
+<div className="count-txt">{currentList.length} vulnerabilidad{currentList.length!==1?'es':''}{visibleCount<currentList.length?` · mostrando ${visibleList.length}`:''}</div>
+<div className="vlist">{visibleList.length===0?<div className="empty"><IC.Check s={40}/><p>No se encontraron vulnerabilidades</p></div>:visibleList.map(v=>{const key=v.id+':'+v.pkg;return <VulnRow key={key} v={v} data={data} isOpen={expandedId===key} onToggle={()=>setExpandedId(expandedId===key?null:key)}/>})}</div>
+{visibleCount<currentList.length&&<div ref={sentinelRef} className="sentinel"/>}</>}
+
+{docsOpen&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={()=>setDocsOpen(false)}><div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:16,maxWidth:680,width:'100%',maxHeight:'80vh',overflow:'auto',padding:'28px 32px',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}} onClick={e=>e.stopPropagation()}>
+<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700,display:'flex',alignItems:'center',gap:8}}><IC.Shield s={20}/> Documentación</h2><button className="btn-icon" onClick={()=>setDocsOpen(false)}><IC.X s={15}/></button></div>
+<div style={{fontSize:13,lineHeight:1.8,color:'var(--tx2)'}}>
+<h3 style={{fontSize:15,fontWeight:700,color:'var(--tx)',marginBottom:8,marginTop:0}}>¿Qué es Trivy Security?</h3>
+<p style={{marginBottom:16}}>Trivy escanea las imágenes Docker y paquetes del sistema de tu fleet de máquinas buscando vulnerabilidades conocidas (CVEs).</p>
+<h3 style={{fontSize:15,fontWeight:700,color:'var(--tx)',marginBottom:8}}>Cómo navegar</h3>
+<p style={{marginBottom:6}}><strong style={{color:'var(--acc)'}}>Tarjetas de resumen</strong> — Click filtra por severidad. El gráfico se sincroniza: solo muestra esa línea. Click de nuevo limpia todo.</p>
+<p style={{marginBottom:6}}><strong style={{color:'var(--acc)'}}>Gráfico</strong> — Click en línea o leyenda filtra igual que las tarjetas. Hover resalta la línea. Se colapsa al usar pestañas.</p>
+<p style={{marginBottom:16}}><strong style={{color:'var(--acc)'}}>Pestañas</strong> — Filtros independientes: Máquinas, Actuar (con fix), Monitorizar (sin fix), Conflictos, Resueltas. Dentro de máquinas y pestañas hay chips de severidad.</p>
+<h3 style={{fontSize:15,fontWeight:700,color:'var(--tx)',marginBottom:8}}>Detalle de vulnerabilidad</h3>
+<p style={{marginBottom:4}}><strong>1. ¿Qué es?</strong> — Explicación generada por IA en español.</p>
+<p style={{marginBottom:4}}><strong>2. ¿Por qué es grave?</strong> — Impacto real en tu infraestructura.</p>
+<p style={{marginBottom:4}}><strong>3. Paquete afectado</strong> — Versión actual y corregida.</p>
+<p style={{marginBottom:4}}><strong>4. ¿Dónde afecta?</strong> — Máquinas, imágenes Docker y ruta del compose.</p>
+<p style={{marginBottom:4}}><strong>5. Dependencias</strong> — Paquetes que usan este.</p>
+<p style={{marginBottom:4}}><strong>6. Conflictos</strong> — Riesgo de actualizar.</p>
+<p style={{marginBottom:16}}><strong>7. ¿Qué hacer?</strong> — Pasos exactos. Verde=seguro, naranja=cuidado, gris=sin solución.</p>
+<h3 style={{fontSize:15,fontWeight:700,color:'var(--tx)',marginBottom:8}}>Memoria</h3>
+<p>La URL guarda tu posición: pestaña, máquina, filtro, CVE abierto y estado del gráfico. Al refrescar vuelves donde estabas.</p>
+</div></div></div>}
+</div>;}
+
+ReactDOM.createRoot(document.getElementById('app')).render(<App/>);
+</script>
+
+<script>
+(function(){
+var btn=document.createElement('button');
+btn.className='scroll-top';
+btn.innerHTML='↑';
+btn.title='Subir';
+btn.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};
+document.body.appendChild(btn);
+window.addEventListener('scroll',function(){
+  btn.classList.toggle('show',window.scrollY>300);
+});
+})();
+</script>
+</body>
+</html>

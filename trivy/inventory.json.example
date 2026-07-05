@@ -1,0 +1,16 @@
+[
+  {
+    "name": "host-1",
+    "role": "production",
+    "ssh": "ssh -o ConnectTimeout=10 -o BatchMode=yes ubuntu@10.0.0.10",
+    "ssh_user": "ubuntu",
+    "private_ip": "10.0.0.10"
+  },
+  {
+    "name": "host-2",
+    "role": "staging",
+    "ssh": "ssh -o ConnectTimeout=10 -o BatchMode=yes ubuntu@10.0.0.20",
+    "ssh_user": "ubuntu",
+    "private_ip": "10.0.0.20"
+  }
+]

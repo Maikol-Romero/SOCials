@@ -1,0 +1,4 @@
+#!/bin/sh
+# Wazuh integration wrapper: invoked by ossec-integratord with
+#   <alert.json> <webhook> [api-key-unused] [integration-name]
+exec /usr/bin/env python3 "$(dirname "$0")/custom-discord.py" "$@"

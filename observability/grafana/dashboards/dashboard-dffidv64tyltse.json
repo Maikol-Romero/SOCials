@@ -1,0 +1,3016 @@
+{
+    "meta": {
+        "type": "db",
+        "canSave": true,
+        "canEdit": true,
+        "canAdmin": true,
+        "canStar": true,
+        "canDelete": true,
+        "slug": "soc-estado-general",
+        "url": "/d/dffidv64tyltse/soc-estado-general",
+        "expires": "0001-01-01T00:00:00Z",
+        "created": "2026-03-09T15:51:24Z",
+        "updated": "2026-04-08T10:30:50Z",
+        "updatedBy": "admin",
+        "createdBy": "admin",
+        "version": 21,
+        "hasAcl": false,
+        "isFolder": false,
+        "apiVersion": "v0alpha1",
+        "folderId": 0,
+        "folderUid": "",
+        "folderTitle": "General",
+        "folderUrl": "",
+        "provisioned": false,
+        "provisionedExternalId": "",
+        "annotationsPermissions": {
+            "dashboard": {
+                "canAdd": true,
+                "canEdit": true,
+                "canDelete": true
+            },
+            "organization": {
+                "canAdd": true,
+                "canEdit": true,
+                "canDelete": true
+            }
+        }
+    },
+    "dashboard": {
+        "annotations": {
+            "list": [
+                {
+                    "builtIn": 1,
+                    "datasource": {
+                        "type": "grafana",
+                        "uid": "-- Grafana --"
+                    },
+                    "enable": true,
+                    "hide": true,
+                    "iconColor": "rgba(0, 211, 255, 1)",
+                    "name": "Annotations & Alerts",
+                    "type": "dashboard"
+                }
+            ]
+        },
+        "editable": true,
+        "fiscalYearStartMonth": 0,
+        "graphTooltip": 0,
+        "id": 1,
+        "links": [
+            {
+                "icon": "dashboard",
+                "targetBlank": false,
+                "title": "Container Logs",
+                "type": "link",
+                "url": "/d/container-logs"
+            }
+        ],
+        "panels": [
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Uso de CPU por máquina. >80% sostenido indica que necesita más recursos o hay un proceso consumiendo demasiado.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 90
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 4,
+                    "x": 0,
+                    "y": 0
+                },
+                "id": 1,
+                "options": {
+                    "minVizHeight": 75,
+                    "minVizWidth": 75,
+                    "orientation": "auto",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true,
+                    "sizing": "auto"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"}[5m])) * 100)",
+                        "legendFormat": "{{instance}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "CPU %",
+                "type": "gauge"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Uso de RAM por máquina. >85% es preocupante — el sistema puede empezar a usar swap y ralentizarse.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 90
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 4,
+                    "x": 4,
+                    "y": 0
+                },
+                "id": 2,
+                "options": {
+                    "minVizHeight": 75,
+                    "minVizWidth": 75,
+                    "orientation": "auto",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true,
+                    "sizing": "auto"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "(1 - (node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"})) * 100",
+                        "legendFormat": "{{instance}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "RAM %",
+                "type": "gauge"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Uso de disco por máquina. >80% hay que limpiar logs o ampliar disco. >90% es crítico.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 85
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 4,
+                    "x": 8,
+                    "y": 0
+                },
+                "id": 3,
+                "options": {
+                    "minVizHeight": 75,
+                    "minVizWidth": 75,
+                    "orientation": "auto",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true,
+                    "sizing": "auto"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "(1 - (node_filesystem_avail_bytes{instance=~\"$instance\",mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{instance=~\"$instance\",mountpoint=\"/\",fstype!=\"tmpfs\"})) * 100",
+                        "legendFormat": "{{instance}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Disco %",
+                "type": "gauge"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Tiempo que lleva cada máquina encendida sin reiniciar.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "dtdurations"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 4,
+                    "x": 12,
+                    "y": 0
+                },
+                "id": 4,
+                "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "auto",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "node_time_seconds{instance=~\"$instance\"} - node_boot_time_seconds{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Uptime",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Porcentaje de peticiones a Redis que se sirven desde caché. >95% es bueno. Si baja, Redis no está siendo efectivo.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 90
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 99
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 4,
+                    "x": 16,
+                    "y": 0
+                },
+                "id": 5,
+                "options": {
+                    "minVizHeight": 75,
+                    "minVizWidth": 75,
+                    "orientation": "auto",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true,
+                    "sizing": "auto"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "redis_keyspace_hits_total{instance=~\"$instance\"} / (redis_keyspace_hits_total{instance=~\"$instance\"} + redis_keyspace_misses_total{instance=~\"$instance\"}) * 100",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Redis Hit Rate",
+                "type": "gauge"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Porcentaje de queries de PostgreSQL servidas desde buffer cache. >99% es ideal. Si baja, la BD está leyendo demasiado de disco.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 95
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 99
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 4,
+                    "x": 20,
+                    "y": 0
+                },
+                "id": 6,
+                "options": {
+                    "minVizHeight": 75,
+                    "minVizWidth": 75,
+                    "orientation": "auto",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true,
+                    "sizing": "auto"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "pg_stat_database_blks_hit{instance=~\"$instance\"} / (pg_stat_database_blks_hit{instance=~\"$instance\"} + pg_stat_database_blks_read{instance=~\"$instance\"}) * 100",
+                        "refId": "A"
+                    }
+                ],
+                "title": "PG Cache Hit",
+                "type": "gauge"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Evolución del uso de CPU en el tiempo. Útil para detectar picos y patrones horarios.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 6
+                },
+                "id": 7,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"}[5m])) * 100)",
+                        "legendFormat": "{{instance}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "CPU Timeline",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Evolución del uso de RAM en el tiempo. Si crece continuamente puede haber un memory leak.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "bytes"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 6
+                },
+                "id": 8,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "node_memory_MemTotal_bytes{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} Total",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "node_memory_MemTotal_bytes{instance=~\"$instance\"} - node_memory_MemAvailable_bytes{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} Usada",
+                        "refId": "B"
+                    }
+                ],
+                "title": "RAM Timeline",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "RAM consumida por cada contenedor. Identifica cuáles consumen más recursos.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "bytes"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 14
+                },
+                "id": 9,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_memory_usage_bytes{name=~\".*\",instance=~\"$instance\"}",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "RAM por Contenedor",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "CPU consumida por cada contenedor. Identifica cuellos de botella.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 14
+                },
+                "id": 10,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(container_cpu_usage_seconds_total{name=~\".*\",instance=~\"$instance\"}[5m]) * 100",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "CPU por Contenedor",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Memoria usada por Redis. Si crece sin control puede quedarse sin RAM.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "bytes"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 0,
+                    "y": 22
+                },
+                "id": 11,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "redis_memory_used_bytes{instance=~\"$instance\"}",
+                        "legendFormat": "Usada",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Redis Memoria",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Comandos por segundo que procesa Redis. Picos pueden indicar alta carga en la API.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "ops"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 6,
+                    "y": 22
+                },
+                "id": 12,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(redis_commands_processed_total{instance=~\"$instance\"}[5m])",
+                        "legendFormat": "cmd/s",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Redis Comandos/s",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Conexiones activas a PostgreSQL. Si se acerca al límite (100), las nuevas conexiones fallarán.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 12,
+                    "y": 22
+                },
+                "id": 13,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "sum(pg_stat_activity_count{instance=~\"$instance\"})",
+                        "legendFormat": "Activas",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "pg_settings_max_connections{instance=~\"$instance\"}",
+                        "legendFormat": "Maximo",
+                        "refId": "B"
+                    }
+                ],
+                "title": "PostgreSQL Conexiones",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Queries por segundo a PostgreSQL. Útil para correlacionar con latencia de la API.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "ops"
+                    },
+                    "overrides": [
+                        {
+                            "__systemRef": "hideSeriesFrom",
+                            "matcher": {
+                                "id": "byNames",
+                                "options": {
+                                    "mode": "exclude",
+                                    "names": [
+                                        "SELECT/s"
+                                    ],
+                                    "prefix": "All except:",
+                                    "readOnly": true
+                                }
+                            },
+                            "properties": [
+                                {
+                                    "id": "custom.hideFrom",
+                                    "value": {
+                                        "legend": false,
+                                        "tooltip": true,
+                                        "viz": true
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 18,
+                    "y": 22
+                },
+                "id": 14,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(pg_stat_database_tup_fetched{instance=~\"$instance\"}[5m])",
+                        "legendFormat": "SELECT/s",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(pg_stat_database_tup_inserted{instance=~\"$instance\"}[5m])",
+                        "legendFormat": "INSERT/s",
+                        "refId": "B"
+                    }
+                ],
+                "title": "PostgreSQL Queries/s",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Tráfico de red entrante/saliente por máquina.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "Bps"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 30
+                },
+                "id": 15,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(node_network_receive_bytes_total{instance=~\"$instance\",device=\"eth0\"}[5m])",
+                        "legendFormat": "{{instance}} RX",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(node_network_transmit_bytes_total{instance=~\"$instance\",device=\"eth0\"}[5m])",
+                        "legendFormat": "{{instance}} TX",
+                        "refId": "B"
+                    }
+                ],
+                "title": "Network I/O",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Operaciones de lectura/escritura a disco por máquina.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "Bps"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 30
+                },
+                "id": 16,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(node_disk_read_bytes_total{instance=~\"$instance\",device=~\"sd.*|nvme.*\"}[5m])",
+                        "legendFormat": "{{instance}} Read",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(node_disk_written_bytes_total{instance=~\"$instance\",device=~\"sd.*|nvme.*\"}[5m])",
+                        "legendFormat": "{{instance}} Write",
+                        "refId": "B"
+                    }
+                ],
+                "title": "Disco I/O",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Porcentaje de uso de la GPU (CUDA cores). 0% si no hay inferencias activas. >80% la GPU está saturada.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 90
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 6,
+                    "x": 0,
+                    "y": 38
+                },
+                "id": 17,
+                "options": {
+                    "minVizHeight": 75,
+                    "minVizWidth": 75,
+                    "orientation": "auto",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true,
+                    "sizing": "auto"
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} GPU {{gpu}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "GPU Utilization %",
+                "type": "gauge"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "VRAM usada por la GPU. Si se llena, las inferencias fallarán con OOM.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "decmbytes"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 6,
+                    "x": 6,
+                    "y": 38
+                },
+                "id": 18,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "DCGM_FI_DEV_FB_USED{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} Usada",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "DCGM_FI_DEV_FB_FREE{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} Libre",
+                        "refId": "B"
+                    }
+                ],
+                "title": "GPU Memory Used",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Temperatura de la GPU. >85°C puede causar throttling (la GPU se frena para no sobrecalentarse).",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 85
+                                }
+                            ]
+                        },
+                        "unit": "celsius"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 6,
+                    "x": 12,
+                    "y": 38
+                },
+                "id": 19,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "DCGM_FI_DEV_GPU_TEMP{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} GPU {{gpu}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "GPU Temperature",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Consumo eléctrico de la GPU en watts.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "watt"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 6,
+                    "x": 18,
+                    "y": 38
+                },
+                "id": 20,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "DCGM_FI_DEV_POWER_USAGE{instance=~\"$instance\"}",
+                        "legendFormat": "{{instance}} GPU {{gpu}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "GPU Power Usage",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Estado de cada contenedor: running (verde), stopped (rojo), unhealthy (amarillo).",
+                "fieldConfig": {
+                    "defaults": {
+                        "custom": {
+                            "align": "auto",
+                            "cellOptions": {
+                                "type": "auto"
+                            },
+                            "footer": {
+                                "reducers": []
+                            },
+                            "inspect": false
+                        },
+                        "links": [
+                            {
+                                "targetBlank": true,
+                                "title": "Ver logs del contenedor",
+                                "url": "/d/container-logs?var-container=${__field.labels.name}&var-host=${__field.labels.instance}&from=${__from}&to=${__to}"
+                            }
+                        ],
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "bytes"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 24,
+                    "x": 0,
+                    "y": 44
+                },
+                "id": 21,
+                "options": {
+                    "cellHeight": "sm",
+                    "showHeader": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_memory_usage_bytes{name=~\".+\",instance=~\"$instance\"}",
+                        "format": "table",
+                        "instant": true,
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Estado de Contenedores",
+                "transformations": [
+                    {
+                        "id": "organize",
+                        "options": {
+                            "excludeByName": {
+                                "Time": true,
+                                "__name__": true,
+                                "id": true,
+                                "job": true,
+                                "layer": true
+                            },
+                            "renameByName": {
+                                "Value": "RAM Usada",
+                                "instance": "Servidor",
+                                "name": "Contenedor"
+                            }
+                        }
+                    }
+                ],
+                "type": "table"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "CPU de cada contenedor en detalle, todas las máquinas.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "percent"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 52
+                },
+                "id": 22,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(container_cpu_usage_seconds_total{name=~\".+\",instance=~\"$instance\"}[5m]) * 100",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "CPU por Contenedor (todos)",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "RAM de cada contenedor en detalle, todas las máquinas.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "bytes"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 52
+                },
+                "id": 23,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_memory_usage_bytes{name=~\".+\",instance=~\"$instance\"}",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "RAM por Contenedor (todos)",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Tráfico de red por contenedor.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "Bps"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 60
+                },
+                "id": 24,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(container_network_receive_bytes_total{name=~\".+\",instance=~\"$instance\"}[5m])",
+                        "legendFormat": "{{name}} RX",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(container_network_transmit_bytes_total{name=~\".+\",instance=~\"$instance\"}[5m])",
+                        "legendFormat": "{{name}} TX",
+                        "refId": "B"
+                    }
+                ],
+                "title": "Red por Contenedor (todos)",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "I/O de disco por contenedor.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "Bps"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 60
+                },
+                "id": 25,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(container_fs_reads_bytes_total{name=~\".+\",instance=~\"$instance\"}[5m])",
+                        "legendFormat": "{{name}} Read",
+                        "refId": "A"
+                    },
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "rate(container_fs_writes_bytes_total{name=~\".+\",instance=~\"$instance\"}[5m])",
+                        "legendFormat": "{{name}} Write",
+                        "refId": "B"
+                    }
+                ],
+                "title": "Disco I/O por Contenedor (todos)",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Contenedores que se han reiniciado en las últimas 24h. Reinicios frecuentes indican un problema.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "links": [
+                            {
+                                "targetBlank": true,
+                                "title": "Ver logs del contenedor",
+                                "url": "/d/container-logs?var-container=${__field.labels.name}&var-host=${__field.labels.instance}&from=${__from}&to=${__to}"
+                            }
+                        ],
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "short"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 68
+                },
+                "id": 30,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "increase(container_restarts[1h]) > 0",
+                        "legendFormat": "{{instance}} / {{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Reinicios de Contenedores (24h)",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Tiempo de respuesta de los healthchecks HTTP de cada servicio. Si sube, el servicio va lento.",
+                "fieldConfig": {
+                    "defaults": {
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "axisBorderShow": false,
+                            "axisCenteredZero": false,
+                            "axisColorMode": "text",
+                            "axisLabel": "",
+                            "axisPlacement": "auto",
+                            "barAlignment": 0,
+                            "barWidthFactor": 0.6,
+                            "drawStyle": "line",
+                            "fillOpacity": 0,
+                            "gradientMode": "none",
+                            "hideFrom": {
+                                "legend": false,
+                                "tooltip": false,
+                                "viz": false
+                            },
+                            "insertNulls": false,
+                            "lineInterpolation": "linear",
+                            "lineWidth": 1,
+                            "pointSize": 5,
+                            "scaleDistribution": {
+                                "type": "linear"
+                            },
+                            "showPoints": "auto",
+                            "showValues": false,
+                            "spanNulls": false,
+                            "stacking": {
+                                "group": "A",
+                                "mode": "none"
+                            },
+                            "thresholdsStyle": {
+                                "mode": "off"
+                            }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 80
+                                }
+                            ]
+                        },
+                        "unit": "s"
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 68
+                },
+                "id": 32,
+                "options": {
+                    "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom",
+                        "showLegend": true
+                    },
+                    "tooltip": {
+                        "hideZeros": false,
+                        "maxHeight": 600,
+                        "mode": "single",
+                        "sort": "none"
+                    }
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "probe_duration_seconds",
+                        "legendFormat": "{{job}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Latencia HTTP (healthchecks)",
+                "type": "timeseries"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Estado de contenedores en host-1.",
+                "fieldConfig": {
+                    "defaults": {
+                        "links": [
+                            {
+                                "targetBlank": true,
+                                "title": "Ver logs del contenedor",
+                                "url": "/d/container-logs?var-container=${__field.labels.name}&var-host=${__field.labels.instance}&from=${__from}&to=${__to}"
+                            }
+                        ],
+                        "mappings": [
+                            {
+                                "options": {
+                                    "0": {
+                                        "color": "red",
+                                        "text": "DOWN"
+                                    },
+                                    "1": {
+                                        "color": "green",
+                                        "text": "UP"
+                                    }
+                                },
+                                "type": "value"
+                            }
+                        ],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 1
+                                }
+                            ]
+                        }
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 10,
+                    "w": 24,
+                    "x": 0,
+                    "y": 76
+                },
+                "id": 26,
+                "options": {
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "value_and_name",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_up{instance=\"host-1\"}",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Contenedores host-1",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Estado de contenedores en host-2.",
+                "fieldConfig": {
+                    "defaults": {
+                        "links": [
+                            {
+                                "targetBlank": true,
+                                "title": "Ver logs del contenedor",
+                                "url": "/d/container-logs?var-container=${__field.labels.name}&var-host=${__field.labels.instance}&from=${__from}&to=${__to}"
+                            }
+                        ],
+                        "mappings": [
+                            {
+                                "options": {
+                                    "0": {
+                                        "color": "red",
+                                        "text": "DOWN"
+                                    },
+                                    "1": {
+                                        "color": "green",
+                                        "text": "UP"
+                                    }
+                                },
+                                "type": "value"
+                            }
+                        ],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 1
+                                }
+                            ]
+                        }
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 10,
+                    "w": 24,
+                    "x": 0,
+                    "y": 86
+                },
+                "id": 27,
+                "options": {
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "value_and_name",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_up{instance=\"host-2\"}",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Contenedores host-2",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Resultado de los healthchecks HTTP (UP/DOWN) de cada servicio monitorizado.",
+                "fieldConfig": {
+                    "defaults": {
+                        "mappings": [
+                            {
+                                "options": {
+                                    "0": {
+                                        "color": "red",
+                                        "text": "FAIL"
+                                    },
+                                    "1": {
+                                        "color": "green",
+                                        "text": "OK"
+                                    }
+                                },
+                                "type": "value"
+                            }
+                        ],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 1
+                                }
+                            ]
+                        }
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 5,
+                    "w": 24,
+                    "x": 0,
+                    "y": 96
+                },
+                "id": 31,
+                "options": {
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "value_and_name",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "probe_success",
+                        "legendFormat": "{{job}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Healthchecks HTTP",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Estado de contenedores en host-4.",
+                "fieldConfig": {
+                    "defaults": {
+                        "links": [
+                            {
+                                "targetBlank": true,
+                                "title": "Ver logs del contenedor",
+                                "url": "/d/container-logs?var-container=${__field.labels.name}&var-host=${__field.labels.instance}&from=${__from}&to=${__to}"
+                            }
+                        ],
+                        "mappings": [
+                            {
+                                "options": {
+                                    "0": {
+                                        "color": "red",
+                                        "text": "DOWN"
+                                    },
+                                    "1": {
+                                        "color": "green",
+                                        "text": "UP"
+                                    }
+                                },
+                                "type": "value"
+                            }
+                        ],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 1
+                                }
+                            ]
+                        }
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 12,
+                    "x": 12,
+                    "y": 101
+                },
+                "id": 29,
+                "options": {
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "value_and_name",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_up{instance=\"host-4\"}",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Contenedores host-4",
+                "type": "stat"
+            },
+            {
+                "datasource": {
+                    "uid": "prometheus"
+                },
+                "description": "Estado de contenedores en host-3.",
+                "fieldConfig": {
+                    "defaults": {
+                        "links": [
+                            {
+                                "targetBlank": true,
+                                "title": "Ver logs del contenedor",
+                                "url": "/d/container-logs?var-container=${__field.labels.name}&var-host=${__field.labels.instance}&from=${__from}&to=${__to}"
+                            }
+                        ],
+                        "mappings": [
+                            {
+                                "options": {
+                                    "0": {
+                                        "color": "red",
+                                        "text": "DOWN"
+                                    },
+                                    "1": {
+                                        "color": "green",
+                                        "text": "UP"
+                                    }
+                                },
+                                "type": "value"
+                            }
+                        ],
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "red",
+                                    "value": 0
+                                },
+                                {
+                                    "color": "green",
+                                    "value": 1
+                                }
+                            ]
+                        }
+                    },
+                    "overrides": []
+                },
+                "gridPos": {
+                    "h": 6,
+                    "w": 12,
+                    "x": 0,
+                    "y": 107
+                },
+                "id": 33,
+                "options": {
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "percentChangeColorMode": "standard",
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                    },
+                    "showPercentChange": false,
+                    "textMode": "value_and_name",
+                    "wideLayout": true
+                },
+                "pluginVersion": "12.4.1",
+                "targets": [
+                    {
+                        "datasource": {
+                            "uid": "prometheus"
+                        },
+                        "expr": "container_up{instance=\"host-3\"}",
+                        "legendFormat": "{{name}}",
+                        "refId": "A"
+                    }
+                ],
+                "title": "Contenedores host-3",
+                "type": "stat"
+            }
+        ],
+        "preload": false,
+        "refresh": "5s",
+        "schemaVersion": 42,
+        "tags": [
+            "soc",
+            "infrastructure"
+        ],
+        "templating": {
+            "list": [
+                {
+                    "current": {
+                        "text": "All",
+                        "value": "$__all"
+                    },
+                    "datasource": {
+                        "uid": "prometheus"
+                    },
+                    "definition": "",
+                    "includeAll": true,
+                    "multi": true,
+                    "name": "instance",
+                    "options": [],
+                    "query": "label_values(node_uname_info, instance)",
+                    "refresh": 2,
+                    "regex": "",
+                    "regexApplyTo": "value",
+                    "type": "query"
+                }
+            ]
+        },
+        "time": {
+            "from": "now-6h",
+            "to": "now"
+        },
+        "timepicker": {},
+        "timezone": "browser",
+        "title": "SOC - Estado General",
+        "uid": "dffidv64tyltse",
+        "version": 21,
+        "weekStart": ""
+    }
+}

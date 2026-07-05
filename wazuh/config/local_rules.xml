@@ -1,0 +1,28 @@
+<!--
+  Wazuh custom rules — secrets-tripwire alerts
+  Place at /var/ossec/etc/rules/local_rules.xml on the manager
+  (or shared/default/local_rules.xml for cluster-wide).
+
+  Reads the audit events emitted by the kernel rules in
+  config/audit-rules/secrets-tripwire.rules. Because the audit rules
+  themselves filter auid!=unset, there is no need for a suppression
+  rule here — anything that reaches us is by definition an interactive
+  read of a protected path.
+-->
+<group name="audit,secrets-tripwire,">
+
+  <rule id="100810" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">secrets_read</field>
+    <description>Interactive read of secrets directory (audit key: secrets_read) — user uid=$(audit.uid) pid=$(audit.pid) exe=$(audit.exe) read $(audit.file.name)</description>
+    <group>audit_secrets,pci_dss_10.2.1,gdpr_IV_32.2,</group>
+  </rule>
+
+  <rule id="100811" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">keymat</field>
+    <description>Interactive touch of key material (audit key: keymat) — user uid=$(audit.uid) pid=$(audit.pid) exe=$(audit.exe) touched $(audit.file.name)</description>
+    <group>audit_secrets,pci_dss_10.2.1,gdpr_IV_32.2,</group>
+  </rule>
+
+</group>

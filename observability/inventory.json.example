@@ -1,0 +1,14 @@
+[
+  {
+    "name": "monitor-host",
+    "role": "monitor",
+    "ip": "10.20.0.1",
+    "ssh": "ssh ubuntu@10.20.0.1"
+  },
+  {
+    "name": "host-1",
+    "role": "worker",
+    "ip": "10.20.0.10",
+    "ssh": "ssh ubuntu@10.20.0.10"
+  }
+]

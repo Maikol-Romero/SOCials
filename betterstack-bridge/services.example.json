@@ -1,0 +1,136 @@
+{
+  "_comment": "Edit this file (or copy to services.json — gitignored) to define your service categories, routing maps, and incident messaging templates. The script loads services.json if present, otherwise falls back to this file.",
+
+  "language": "english",
+  "list_separator": " and ",
+  "timezone_offset_hours": 0,
+
+  "claude": {
+    "model": "claude-haiku-4-5-20251001",
+    "timeout_s": 20,
+    "prompt_template": "Status page for the platform. Service affected: {service_name}. {base_ctx}{extra} Write ONE single message of exactly 2 very short sentences to inform customers. Brief, direct, professional, in {language}. No emojis, no quotes. Reply ONLY with the message, nothing else."
+  },
+
+  "services": {
+    "api": "API",
+    "web": "Website",
+    "worker": "Background Workers",
+    "database": "Database",
+    "queue": "Message Queue"
+  },
+
+  "resource_names_in_message": {
+    "api": "the API",
+    "web": "the website",
+    "worker": "background workers",
+    "database": "the database",
+    "queue": "the message queue"
+  },
+
+  "incident_types": [
+    ["downtime",       "Service down"],
+    ["degraded",       "Degraded performance"],
+    ["intermittent",   "Intermittent outages"],
+    ["latency",        "Elevated latency"],
+    ["partial_errors", "Partial errors"],
+    ["capacity",       "Reduced capacity"]
+  ],
+
+  "type_to_status": {
+    "downtime": "downtime",
+    "degraded": "degraded",
+    "intermittent": "degraded",
+    "latency": "degraded",
+    "partial_errors": "degraded",
+    "capacity": "degraded"
+  },
+
+  "lifecycle_updates": [
+    ["investigating", "Investigating"],
+    ["identified",    "Cause identified"],
+    ["fixing",        "Fix in progress"],
+    ["monitoring",    "Monitoring"]
+  ],
+
+  "titles": {
+    "downtime":       "Outage in {s}",
+    "degraded":       "Degraded performance in {s}",
+    "intermittent":   "Intermittent outages in {s}",
+    "latency":        "Elevated latency in {s}",
+    "partial_errors": "Partial errors in {s}",
+    "capacity":       "Reduced capacity in {s}",
+    "maintenance":    "Scheduled maintenance in {s}",
+    "maint_all":      "Scheduled platform maintenance",
+    "incident_all":   "Platform-wide outage"
+  },
+
+  "fallback_messages": {
+    "downtime":       "We are currently experiencing an outage in {s}. Our team is working to resolve the issue.",
+    "degraded":       "We are detecting degraded performance in {s}. Our team is investigating.",
+    "intermittent":   "{s} is experiencing intermittent outages. We are investigating the cause.",
+    "latency":        "We are detecting elevated response times in {s}. Our team is investigating.",
+    "partial_errors": "Some users are experiencing errors in {s}. We are working on a resolution.",
+    "capacity":       "{s} is operating at reduced capacity. We are working to restore full capacity.",
+    "investigating":  "We are investigating an issue in {s}. We will provide more information shortly.",
+    "identified":     "We have identified the cause of the issue in {s} and are working on a solution.",
+    "fixing":         "A fix is being applied to {s}. We expect it to be resolved shortly.",
+    "monitoring":     "A fix has been applied to {s}. We are monitoring the results.",
+    "resolved":       "The service has been restored and {s} is operating normally. Sorry for the inconvenience.",
+    "maintenance":    "We will be performing maintenance on {s}. There may be brief interruptions.",
+    "maint_update":   "Maintenance in {s} is still in progress. Thank you for your patience.",
+    "maint_extended": "Maintenance in {s} is taking longer than expected. Thank you for your patience.",
+    "maint_end":      "Maintenance has finished. All services are operating normally."
+  },
+
+  "claude_contexts": {
+    "downtime":       "State: completely down.",
+    "degraded":       "State: degraded performance.",
+    "intermittent":   "State: intermittent outages, works at times.",
+    "latency":        "State: elevated latency, slow responses.",
+    "partial_errors": "State: partial errors, some users affected.",
+    "capacity":       "State: reduced capacity.",
+    "investigating":  "State: investigating the issue.",
+    "identified":     "State: cause identified, working on a solution.",
+    "fixing":         "State: fix in progress.",
+    "monitoring":     "State: fix applied, monitoring results.",
+    "resolved":       "State: restored, operating normally.",
+    "maintenance":    "Type: start of scheduled maintenance.",
+    "maint_update":   "Type: maintenance in progress.",
+    "maint_extended": "Type: maintenance extended beyond planned duration.",
+    "maint_end":      "Type: maintenance finished. Everything operational."
+  },
+
+  "_comment_grafana_map": "Maps Grafana alert label substrings (container/instance/job) to service keys. Edit per your fleet's naming convention.",
+  "grafana_map": {
+    "api":       "api",
+    "webhooks":  "api",
+    "nginx":     "web",
+    "frontend":  "web",
+    "worker":    "worker",
+    "celery":    "worker",
+    "postgres":  "database",
+    "mysql":     "database",
+    "redis":     "database",
+    "rabbitmq":  "queue",
+    "kafka":     "queue"
+  },
+
+  "_comment_betterstack_monitor_map": "Ordered list of [substring, service_key]. First substring (case-insensitive) found in the BS monitor name decides routing. Edit to fit your monitor naming convention.",
+  "betterstack_monitor_map": [
+    ["api",      "api"],
+    ["webhook",  "api"],
+    ["frontend", "web"],
+    ["nginx",    "web"],
+    ["web",      "web"],
+    ["worker",   "worker"],
+    ["celery",   "worker"],
+    ["postgres", "database"],
+    ["mysql",    "database"],
+    ["redis",    "database"],
+    ["rabbit",   "queue"],
+    ["kafka",    "queue"]
+  ],
+
+  "_comment_probe_guard": "Names containing any of these substrings are dropped (case-insensitive) — protects the public status page from accidental triggers.",
+  "probe_guard_substrings": ["test", "smoke", "probe", "synthetic", "dummy", "ignore"]
+}

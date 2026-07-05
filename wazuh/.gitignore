@@ -1,0 +1,28 @@
+# Local secrets — NEVER commit
+*.env
+.env
+.env.*
+!*.env.example
+
+# Wazuh-generated TLS material — NEVER commit
+certs/*.pem
+certs/*.key
+certs/wazuh-certs-tool.sh
+certs/wazuh-certificates-tool.log
+certs/wazuh-certificates/
+
+# Inventory with real hostnames — replace with example
+inventory.json
+!inventory.json.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+docker-compose.yml.bak-*
+config/*.bak

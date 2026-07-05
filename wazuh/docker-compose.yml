@@ -1,0 +1,162 @@
+# ============================================
+# Stack de Seguridad — Wazuh (manager host)
+# ============================================
+# Manager: recibe eventos de agentes | Indexer: almacena y busca
+# Dashboard: interfaz web | Solo accesible vía la mesh privada (VPN).
+
+services:
+  # ============================================
+  # 1. WAZUH INDEXER (OpenSearch)
+  # ============================================
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.14.4
+    container_name: soc-wazuh-indexer
+    hostname: wazuh.indexer
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=${INDEXER_JAVA_OPTS:--Xms1g -Xmx1g}"
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${INDEXER_PASSWORD}"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "plugins.security.ssl.http.enabled=true"
+      - "plugins.security.ssl.http.pemcert_filepath=/usr/share/wazuh-indexer/certs/wazuh.indexer.pem"
+      - "plugins.security.ssl.http.pemkey_filepath=/usr/share/wazuh-indexer/certs/wazuh.indexer-key.pem"
+      - "plugins.security.ssl.http.pemtrustedcas_filepath=/usr/share/wazuh-indexer/certs/root-ca.pem"
+      - "plugins.security.ssl.transport.pemcert_filepath=/usr/share/wazuh-indexer/certs/wazuh.indexer.pem"
+      - "plugins.security.ssl.transport.pemkey_filepath=/usr/share/wazuh-indexer/certs/wazuh.indexer-key.pem"
+      - "plugins.security.ssl.transport.pemtrustedcas_filepath=/usr/share/wazuh-indexer/certs/root-ca.pem"
+      - "plugins.security.authcz.admin_dn=CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US"
+    volumes:
+      - indexer-data:/var/lib/wazuh-indexer
+      - ./config/opensearch.yml:/usr/share/wazuh-indexer/config/opensearch.yml
+      - ./certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/indexer.pem
+      - ./certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/indexer-key.pem
+      - ./certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - ./certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - ./certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+    ports:
+      - "${MONITOR_IP}:9200:9200"
+    networks:
+      - wazuh-net
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9200'"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
+
+  # ============================================
+  # 2. WAZUH MANAGER
+  # ============================================
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.14.4
+    container_name: soc-wazuh-manager
+    hostname: wazuh.manager
+    environment:
+      - INDEXER_URL=https://wazuh.indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=${INDEXER_PASSWORD}
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/wazuh.manager.pem
+      - SSL_KEY=/etc/ssl/wazuh.manager-key.pem
+      - API_USERNAME=${WAZUH_API_USER:-wazuh-wui}
+      - API_PASSWORD=${WAZUH_API_PASSWORD}
+    volumes:
+      - manager-data:/var/ossec/data
+      - manager-etc:/var/ossec/etc
+      - manager-logs:/var/ossec/logs
+      - ./certs/root-ca.pem:/etc/ssl/root-ca.pem:ro
+      - ./certs/wazuh.manager.pem:/etc/ssl/wazuh.manager.pem
+      - ./certs/admin.pem:/etc/ssl/admin.pem
+      - ./certs/admin-key.pem:/etc/ssl/admin-key.pem:ro
+      - ./certs/wazuh.manager-key.pem:/etc/ssl/wazuh.manager-key.pem:ro
+      - ./config/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
+    ports:
+      - "${MONITOR_IP}:1514:1514"
+      - "${MONITOR_IP}:1515:1515"
+      - "${MONITOR_IP}:55000:55000"
+    networks:
+      - wazuh-net
+    restart: unless-stopped
+    depends_on:
+      wazuh.indexer:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/55000'"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+
+  # ============================================
+  # 3. WAZUH DASHBOARD
+  # ============================================
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.14.4
+    container_name: soc-wazuh-dashboard
+    hostname: wazuh.dashboard
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=${INDEXER_PASSWORD}
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
+      - API_USERNAME=${WAZUH_API_USER:-wazuh-wui}
+      - API_PASSWORD=${WAZUH_API_PASSWORD}
+      - OPENSEARCH_HOSTS=https://wazuh.indexer:9200
+    volumes:
+      - ./config/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
+      - ./certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/config/certs/dashboard.pem:ro
+      - ./certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/config/certs/dashboard-key.pem:ro
+      - ./certs/root-ca.pem:/usr/share/wazuh-dashboard/config/certs/root-ca.pem:ro
+    ports:
+      - "${MONITOR_IP}:5601:5601"
+    networks:
+      - wazuh-net
+    restart: unless-stopped
+    depends_on:
+      wazuh.indexer:
+        condition: service_healthy
+      wazuh.manager:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/5601'"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+
+networks:
+  wazuh-net:
+    name: soc-wazuh-net
+    driver: bridge
+
+volumes:
+  indexer-data:
+    name: soc-wazuh-indexer-data
+  manager-data:
+    name: soc-wazuh-manager-data
+  manager-etc:
+    name: soc-wazuh-manager-etc
+  manager-logs:
+    name: soc-wazuh-manager-logs

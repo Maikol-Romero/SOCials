@@ -1,0 +1,22 @@
+---
+- Documentación:
+    - Grafana Docs:
+        - abbr: GF
+          href: https://grafana.com/docs/
+    - Wazuh Docs:
+        - abbr: WZ
+          href: https://documentation.wazuh.com/
+    - Prometheus Docs:
+        - abbr: PM
+          href: https://prometheus.io/docs/
+    - Loki Docs:
+        - abbr: LK
+          href: https://grafana.com/docs/loki/latest/
+
+- Infraestructura:
+    - Tailscale Admin:
+        - abbr: TS
+          href: https://login.tailscale.com/admin/machines
+    - Cloudflare DNS:
+        - abbr: CF
+          href: https://dash.cloudflare.com/

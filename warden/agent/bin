@@ -1,0 +1,1058 @@
+#!/usr/bin/env python3
+"""socialwarden-agent — client CLI for the SocialWarden secrets agent.
+
+One tool for the operator on a single machine. Wraps systemd signals and
+inspects local state (heartbeat, metrics, audit log, /run/secrets).
+
+Usage:
+  socialwarden-agent status                  — health + metrics + version
+  socialwarden-agent version                 — just the version + manager reachable
+  socialwarden-agent sync                    — force sync now (sends SIGHUP)
+  socialwarden-agent logs [-n N]             — tail journalctl for the agent
+  socialwarden-agent doctor                  — sanity checks (config, paths,
+                                             permissions, vault reachable)
+  socialwarden-agent discover                — scan this machine for un-migrated
+                                             .env files (read-only)
+  socialwarden-agent migrate [--apply]       — propose and (with --apply) execute
+                                             migration of disk-only secrets to
+                                             vault + merge+symlink activation
+  socialwarden-agent audit [-n N]            — tail the UDS API audit log
+  socialwarden-agent versions <collection>   — list saved version snapshots
+  socialwarden-agent rollback <coll> <ts>    — rollback a collection to ts
+  socialwarden-agent help                    — this message
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Paths (must match the daemon defaults)
+HEARTBEAT_PATH = "/run/socialwarden/heartbeat"
+METRICS_PATH = "/tmp/node-exporter-textfile/socialwarden.prom"
+VERSIONS_DIR = "/var/lib/socialwarden/versions"
+CONFIG_PATH = "/etc/socialwarden/config.yaml"
+AUDIT_LOG = "/var/lib/socialwarden/audit.log"
+SECRETS_DIR = "/run/secrets"
+
+# Pretty output
+RED = "\033[0;31m"; GREEN = "\033[0;32m"; YELLOW = "\033[1;33m"
+BLUE = "\033[0;34m"; BOLD = "\033[1m"; DIM = "\033[2m"; NC = "\033[0m"
+
+def info(m):  print(f"{GREEN}[✓]{NC} {m}")
+def warn(m):  print(f"{YELLOW}[!]{NC} {m}")
+def err(m):   print(f"{RED}[✗]{NC} {m}", file=sys.stderr)
+def step(m):  print(f"\n{BLUE}=== {m} ==={NC}")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def load_config():
+    """Read /etc/socialwarden/config.yaml; return dict or None on error."""
+    try:
+        import yaml
+        with open(CONFIG_PATH) as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return None
+    except PermissionError:
+        err(f"Cannot read {CONFIG_PATH} — run with sudo")
+        sys.exit(2)
+    except Exception as e:
+        err(f"Config parse error: {e}")
+        return None
+
+
+def read_metrics():
+    """Parse the Prometheus text-format metrics file into a dict."""
+    out = {}
+    try:
+        for line in open(METRICS_PATH):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(" ", 1)
+            if len(parts) == 2:
+                out[parts[0]] = parts[1]
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def agent_pid():
+    """Return the main PID of the running agent, or None if not running."""
+    try:
+        r = subprocess.run(
+            ["systemctl", "show", "-p", "MainPID", "--value", "socialwarden-agent"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pid = int(r.stdout.strip())
+        return pid if pid > 0 else None
+    except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
+        return None
+
+
+def heartbeat_age():
+    """Seconds since last heartbeat, or None if no heartbeat file.
+    Returns -1 if file exists but we can't read it (PermissionError)."""
+    try:
+        content = open(HEARTBEAT_PATH).read().strip()
+        hb = datetime.fromisoformat(content)
+        now = datetime.now(timezone.utc)
+        return (now - hb).total_seconds()
+    except (FileNotFoundError, ValueError):
+        return None
+    except PermissionError:
+        return -1  # sentinel: exists but unreadable (need sudo)
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+def cmd_status(_args):
+    print(f"{BOLD}=== SocialWarden Agent Status ==={NC}\n")
+
+    pid = agent_pid()
+    if pid:
+        print(f"Service: {GREEN}active{NC} (PID {pid})")
+    else:
+        print(f"Service: {RED}inactive{NC}")
+
+    age = heartbeat_age()
+    if age is None:
+        print(f"Heartbeat: {RED}missing{NC}")
+    elif age == -1:
+        print(f"Heartbeat: {YELLOW}unreadable{NC} (run with sudo for details)")
+    elif age < 120:
+        print(f"Heartbeat: {GREEN}healthy{NC} ({age:.0f}s ago)")
+    elif age < 600:
+        print(f"Heartbeat: {YELLOW}stale{NC} ({age:.0f}s ago)")
+    else:
+        print(f"Heartbeat: {RED}stalled{NC} ({age:.0f}s ago)")
+
+    metrics = read_metrics()
+    if metrics:
+        print("\nMetrics:")
+        for k in (
+            "socialwarden_sync_total",
+            "socialwarden_sync_errors_total",
+            "socialwarden_secrets_count",
+            "socialwarden_changes_detected_total",
+            "socialwarden_drift_detected_total",
+            "socialwarden_last_sync_timestamp",
+        ):
+            if k in metrics:
+                print(f"  {k:<42} = {metrics[k]}")
+
+    # Secrets files + sizes
+    sd = Path(SECRETS_DIR)
+    if sd.is_dir():
+        try:
+            files = sorted(sd.glob("*.env"))
+            if files:
+                print(f"\nSynced files in {SECRETS_DIR}:")
+                for f in files:
+                    try:
+                        st = f.stat()
+                        age_f = (time.time() - st.st_mtime)
+                        print(f"  {f.name:<24} {st.st_size:>6}B  updated {age_f:.0f}s ago")
+                    except OSError:
+                        continue
+        except PermissionError:
+            warn("Cannot list /run/secrets — run with sudo for full view")
+
+    print()
+
+
+# ---------------------------------------------------------------------------
+# version
+# ---------------------------------------------------------------------------
+def cmd_version(_args):
+    # Version is baked into the agent source
+    agent_src = "/opt/socialwarden-agent/socialwarden-agent.py"
+    if not os.path.exists(agent_src):
+        # backward compat: the old package layout
+        agent_src = "/opt/socialwarden/socialwarden-agent.py"
+    v = "?"
+    try:
+        for line in open(agent_src):
+            m = re.match(r'^VERSION\s*=\s*["\']([^"\']+)', line)
+            if m:
+                v = m.group(1)
+                break
+    except FileNotFoundError:
+        err(f"Agent not installed at {agent_src}")
+        sys.exit(1)
+    except PermissionError:
+        err(f"Cannot read {agent_src} (run with sudo)")
+        sys.exit(2)
+    print(f"socialwarden-agent {v}  ({agent_src})")
+
+    # Manager reachability
+    cfg = load_config()
+    if cfg:
+        server_url = cfg.get("server", {}).get("url", "")
+        if server_url:
+            try:
+                req = urllib.request.Request(f"{server_url}/alive", method="GET")
+                urllib.request.urlopen(req, timeout=5).read()
+                info(f"Manager reachable at {server_url}")
+            except urllib.error.URLError as e:
+                warn(f"Manager unreachable: {server_url} ({e.reason})")
+            except Exception as e:
+                warn(f"Manager check error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# identity
+# ---------------------------------------------------------------------------
+IDENTITY_PUB_PATH = "/var/lib/socialwarden/identity.pub"
+
+
+def cmd_identity(_args):
+    """Show this machine's ed25519 public identity + fingerprint.
+
+    The pubkey is used by the manager to authenticate this machine when it
+    requests Shamir shares from peers. Never prints the private key.
+    """
+    import hashlib
+    p = Path(IDENTITY_PUB_PATH)
+    if not p.exists():
+        warn(f"No identity key at {IDENTITY_PUB_PATH}")
+        warn("The agent generates it on startup. Restart service or wait one cycle.")
+        warn("  sudo systemctl restart socialwarden-agent")
+        sys.exit(1)
+    try:
+        pub_hex = p.read_text().strip()
+    except PermissionError:
+        err("Cannot read identity.pub (unexpected — file should be 0644)")
+        sys.exit(2)
+    try:
+        pub_raw = bytes.fromhex(pub_hex)
+    except ValueError:
+        err(f"identity.pub contents malformed: {pub_hex[:60]}")
+        sys.exit(3)
+
+    fp = hashlib.sha256(pub_raw).hexdigest()[:16]
+    print(f"{BOLD}Machine identity (ed25519){NC}")
+    print(f"  Public key:  {pub_hex}")
+    print(f"  Fingerprint: sha256:{fp}")
+    print()
+    print("To register on the manager host:")
+    print(f"  {BOLD}sudo socialwarden-manager register-identity $(hostname -s){NC}")
+
+
+# ---------------------------------------------------------------------------
+# peer-test — verify share-release endpoint connectivity + auth with a peer
+# ---------------------------------------------------------------------------
+IDENTITY_PRIV_PATH = "/var/lib/socialwarden/identity.key"
+SHARE_RELEASE_PORT = 14841
+
+
+def cmd_peer_test(args):
+    """Test share-release connectivity against <peer>.
+
+    Asks the peer for THIS machine's share. If share is not stored on peer,
+    expect HTTP 404 no_share — but auth (signature) succeeds so we know the
+    pubkey distribution + ed25519 flow works. A full happy-path requires the
+    enrollment flow (Task #36) to actually store shares.
+    """
+    import urllib.request, urllib.error, socket, hashlib as _h
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:
+        err("cryptography library missing; peer-test unavailable")
+        sys.exit(1)
+
+    peer_ip = args.peer
+    if not peer_ip:
+        err("Usage: socialwarden-agent peer-test <peer-ip>")
+        sys.exit(2)
+
+    # Load our private key
+    if not os.path.exists(IDENTITY_PRIV_PATH):
+        err(f"No identity key at {IDENTITY_PRIV_PATH}")
+        err("The agent generates it at startup. Restart service first.")
+        sys.exit(1)
+    try:
+        priv_bytes = open(IDENTITY_PRIV_PATH, "rb").read()
+    except PermissionError:
+        err(f"Cannot read {IDENTITY_PRIV_PATH} — run with sudo")
+        sys.exit(2)
+    priv_key = serialization.load_pem_private_key(priv_bytes, password=None)
+
+    # We sign as "ourself" — requester = our machine name.
+    cfg = load_config()
+    if not cfg:
+        err("Cannot determine machine name — config missing")
+        sys.exit(1)
+    requester = cfg.get("machine", {}).get("name")
+    if not requester:
+        err("config.machine.name missing")
+        sys.exit(1)
+
+    ts = int(time.time())
+    nonce = os.urandom(16).hex()
+    canonical = f"v1|{requester}|{nonce}|{ts}".encode()
+    sig_hex = priv_key.sign(canonical).hex()
+    body = {
+        "v": 1, "requester": requester, "nonce": nonce,
+        "timestamp": ts, "signature": sig_hex,
+    }
+
+    # Health check first
+    url_base = f"http://{peer_ip}:{SHARE_RELEASE_PORT}"
+    try:
+        r = urllib.request.urlopen(url_base + "/health", timeout=3)
+        d = json.loads(r.read().decode())
+        info(f"Peer /health OK: machine={d.get('machine')} v={d.get('v')}")
+    except urllib.error.URLError as e:
+        err(f"Cannot reach {url_base}/health: {e.reason}")
+        sys.exit(3)
+    except (socket.timeout, json.JSONDecodeError) as e:
+        err(f"Health check error: {e}")
+        sys.exit(3)
+
+    # Share-release request
+    import urllib.request as ur
+    req = ur.Request(
+        url_base + "/v1/shamir/release-share",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        resp = ur.urlopen(req, timeout=5).read().decode()
+        d = json.loads(resp)
+        info(f"share-release response: {d}")
+        print(f"{BOLD}Interpretation:{NC}")
+        if d.get("ok"):
+            print(f"  {GREEN}✓ Peer has your share and released it{NC}")
+        else:
+            print(f"  error={d.get('error')}")
+    except urllib.error.HTTPError as e:
+        resp = e.read().decode()
+        try:
+            d = json.loads(resp)
+        except json.JSONDecodeError:
+            d = {"error": resp[:80]}
+        print(f"  HTTP {e.code}: {d}")
+        # Interpret the result
+        if d.get("error") == "no_share":
+            info("Auth succeeded; peer just doesn't have your share (expected pre-enrollment).")
+        elif d.get("error") == "no_pubkey":
+            warn("Peer doesn't have your pubkey registered.")
+            warn("Run on manager: sudo socialwarden-manager distribute-pubkeys")
+        elif d.get("error") == "bad_signature":
+            err("Signature verification FAILED — pubkey on peer may be stale.")
+
+
+# ---------------------------------------------------------------------------
+# sync
+# ---------------------------------------------------------------------------
+def cmd_sync(_args):
+    pid = agent_pid()
+    if not pid:
+        err("Agent not running. Start it with: sudo systemctl start socialwarden-agent")
+        sys.exit(1)
+    try:
+        os.kill(pid, 1)  # SIGHUP triggers a force-sync in the daemon
+        info(f"Sent SIGHUP to PID {pid} — sync scheduled on next wakeup")
+    except ProcessLookupError:
+        err(f"PID {pid} disappeared")
+        sys.exit(1)
+    except PermissionError:
+        err("Permission denied — run with sudo")
+        sys.exit(2)
+
+
+# ---------------------------------------------------------------------------
+# logs
+# ---------------------------------------------------------------------------
+def cmd_logs(args):
+    n = args.n or 40
+    subprocess.run(
+        ["journalctl", "-u", "socialwarden-agent", "-n", str(n), "--no-pager"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# doctor — sanity checks
+# ---------------------------------------------------------------------------
+def cmd_doctor(_args):
+    print(f"{BOLD}=== SocialWarden Doctor ==={NC}\n")
+    problems = 0
+
+    # Config
+    cfg = load_config()
+    if not cfg:
+        err(f"Config missing or invalid at {CONFIG_PATH}")
+        problems += 1
+    else:
+        info(f"Config OK ({CONFIG_PATH})")
+        # Server URL
+        url = cfg.get("server", {}).get("url")
+        if not url:
+            err("config.server.url missing")
+            problems += 1
+        # Machine name
+        name = cfg.get("machine", {}).get("name")
+        if not name:
+            err("config.machine.name missing")
+            problems += 1
+        # Collections
+        colls = cfg.get("sync", {}).get("collections", [])
+        if not colls:
+            warn("No collections configured — agent will run but sync nothing")
+        else:
+            info(f"{len(colls)} collection(s) configured")
+
+    # Master key
+    key_path = "/run/socialwarden/master.key"
+    if cfg:
+        key_path = cfg.get("auth", {}).get("master_key_path", key_path)
+    try:
+        st = os.stat(key_path)
+        if st.st_mode & 0o077:
+            err(f"Master key permissions too open: {oct(st.st_mode & 0o777)}; should be 0600")
+            problems += 1
+        else:
+            info(f"Master key OK ({key_path}, mode {oct(st.st_mode & 0o777)})")
+    except FileNotFoundError:
+        warn(f"Master key missing at {key_path} — run `sudo bw unlock` once")
+    except PermissionError:
+        warn(f"Cannot stat master key at {key_path} (run with sudo to verify)")
+
+    # bw CLI
+    try:
+        r = subprocess.run(["bw", "--version"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            info(f"bw CLI: v{r.stdout.strip()}")
+        else:
+            err("bw CLI failed to report version")
+            problems += 1
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        err("bw CLI not found in PATH")
+        problems += 1
+
+    # Secrets dir
+    sd = Path(SECRETS_DIR)
+    if not sd.is_dir():
+        warn(f"{SECRETS_DIR} does not exist yet")
+    else:
+        try:
+            envs = list(sd.glob("*.env"))
+            info(f"{SECRETS_DIR}: {len(envs)} env file(s)")
+        except PermissionError:
+            warn(f"Cannot list {SECRETS_DIR} (run with sudo for full view)")
+
+    # Heartbeat
+    age = heartbeat_age()
+    if age is None:
+        warn("No heartbeat yet — is the agent running?")
+    elif age > 180:
+        err(f"Heartbeat stale ({age:.0f}s ago)")
+        problems += 1
+    else:
+        info(f"Heartbeat fresh ({age:.0f}s ago)")
+
+    print()
+    if problems:
+        err(f"{problems} problem(s) found")
+        sys.exit(1)
+    else:
+        info("All checks passed")
+
+
+# ---------------------------------------------------------------------------
+# discover — scan machine for un-migrated .env
+# ---------------------------------------------------------------------------
+SECRET_NAME_RE = re.compile(
+    r"(KEY|SECRET|PASS(WORD)?|TOKEN|CREDENTIALS|DSN|BEARER|WEBHOOK|ENC|AUTH|JWT|CERT|_RSA|PRIVATE|SALT|NONCE)(_|$)",
+    re.IGNORECASE,
+)
+
+# Value patterns that indicate a secret regardless of name
+VALUE_PATTERNS = [
+    (re.compile(r"^sk-ant-"),        "Anthropic API key"),
+    (re.compile(r"^sk-proj-"),       "OpenAI project key"),
+    (re.compile(r"^sk-"),            "OpenAI API key"),
+    (re.compile(r"^sk_live_"),       "Stripe live"),
+    (re.compile(r"^sk_test_"),       "Stripe test"),
+    (re.compile(r"^rk_live_"),       "Stripe restricted live"),
+    (re.compile(r"^whsec_"),         "Stripe webhook secret"),
+    (re.compile(r"^AKIA"),           "AWS access key ID"),
+    (re.compile(r"^ASIA"),           "AWS temp access key"),
+    (re.compile(r"^re_"),            "Resend API"),
+    (re.compile(r"^xai-"),           "xAI API"),
+    (re.compile(r"^gsk_"),           "Groq key"),
+    (re.compile(r"^eyJ"),            "JWT signed token"),
+    (re.compile(r"^ghp_"),           "GitHub personal token"),
+    (re.compile(r"^gho_"),           "GitHub oauth token"),
+    (re.compile(r"^-----BEGIN "),    "PEM (certificate/key)"),
+]
+
+
+def _classify(key: str, value: str) -> list[str]:
+    """Return a list of reasons this key=value looks like a secret.
+    Empty list → probably config."""
+    reasons = []
+    if SECRET_NAME_RE.search(key):
+        reasons.append("name")
+    for pat, label in VALUE_PATTERNS:
+        if pat.match(value):
+            reasons.append(f"pattern:{label}")
+            break
+    # Entropy proxy: high-entropy long values
+    if len(value) >= 32:
+        distinct = len(set(value))
+        if distinct >= 16:
+            reasons.append(f"entropy:{len(value)}ch/{distinct}u")
+    return reasons
+
+
+def _extract_env(path: Path) -> list[tuple[str, str]]:
+    """Parse an env-file, return [(key, value), ...]. Skips comments/blanks."""
+    out = []
+    try:
+        for raw in path.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
+            if not m:
+                continue
+            key, value = m.group(1), m.group(2)
+            # strip surrounding quotes
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            out.append((key, value))
+    except (OSError, UnicodeDecodeError):
+        pass
+    return out
+
+
+def _find_env_files() -> list[Path]:
+    """Find .env-like files across the machine, excluding noise."""
+    roots = [Path("/home"), Path("/opt"), Path("/etc"), Path("/root"), Path("/srv")]
+    found = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            # Skip well-known noise dirs at any depth
+            for p in root.rglob("*"):
+                try:
+                    if p.is_symlink() or not p.is_file():
+                        continue
+                except OSError:
+                    continue
+                name = p.name
+                if name.endswith(".swp") or ".bak" in name or ".example" in name:
+                    continue
+                # Skip operator backup snapshots — already-migrated values, not
+                # candidates. Patterns: pre-socialwarden, pre-jwt-*, pre-migration-*,
+                # pre-database, pre-test, pre-rotation-*, etc.
+                if "pre-socialwarden" in name or ".pre-" in name:
+                    continue
+                if any(seg in p.parts for seg in (".git", "node_modules", ".venv", "__pycache__")):
+                    continue
+                # .env, .env.anything, *.env
+                if name == ".env" or name.startswith(".env.") or name.endswith(".env"):
+                    # Skip GHA runner workspace files (those are ephemeral clones)
+                    if "/_work/" in str(p) or "/actions-runner" in str(p):
+                        continue
+                    # Skip stuff inside /run/secrets (the agent's own output)
+                    if str(p).startswith("/run/secrets/"):
+                        continue
+                    found.add(p.resolve())
+        except PermissionError:
+            continue
+    return sorted(found)
+
+
+def _vault_keys_from_synced() -> set[str]:
+    """Return the set of keys currently synced by the agent (from /run/secrets)."""
+    out = set()
+    sd = Path(SECRETS_DIR)
+    if not sd.is_dir():
+        return out
+    try:
+        for envfile in sd.glob("*.env"):
+            try:
+                if envfile.name.endswith(".merged"):
+                    continue
+                for k, _ in _extract_env(envfile):
+                    out.add(k)
+            except OSError:
+                continue
+    except PermissionError:
+        pass
+    return out
+
+
+def cmd_discover(_args):
+    print(f"{BOLD}=== SocialWarden Discovery ==={NC}\n")
+
+    vault_keys = _vault_keys_from_synced()
+    print(f"Keys already in vault (via {SECRETS_DIR}): {len(vault_keys)}")
+
+    files = _find_env_files()
+    if not files:
+        info("No candidate .env files found outside the vault sync.")
+        return
+
+    grand_secrets = 0
+    grand_config = 0
+    for f in files:
+        kvs = _extract_env(f)
+        if not kvs:
+            continue
+        secrets = []
+        config = []
+        for k, v in kvs:
+            if k in vault_keys:
+                continue  # already migrated
+            reasons = _classify(k, v)
+            if reasons:
+                secrets.append((k, reasons))
+            else:
+                config.append(k)
+        if not secrets and not config:
+            continue
+
+        print(f"\n  📄 {f}")
+        print(f"     total={len(kvs)}  already-in-vault={sum(1 for k,_ in kvs if k in vault_keys)}")
+        if secrets:
+            print(f"     {YELLOW}🔒 candidate secrets to migrate ({len(secrets)}):{NC}")
+            for k, r in secrets:
+                print(f"        {k:<30}  [{', '.join(r)}]")
+            grand_secrets += len(secrets)
+        if config:
+            print(f"     {DIM}📄 config (stays in .env.static, {len(config)}): "
+                  f"{', '.join(config[:6])}{'…' if len(config) > 6 else ''}{NC}")
+            grand_config += len(config)
+
+    print()
+    print(f"{BOLD}Summary:{NC}")
+    print(f"  {grand_secrets} secret candidates across {len(files)} files")
+    print(f"  {grand_config} config keys (would stay in .env.static)")
+    if grand_secrets:
+        print()
+        print(f"To execute migration (interactive, per-file confirmation):")
+        print(f"  {BOLD}sudo socialwarden-agent migrate --apply{NC}")
+
+
+# ---------------------------------------------------------------------------
+# migrate — MVP stub (safe: requires --apply flag and confirms per file)
+# ---------------------------------------------------------------------------
+def _bw_create_login(session: str, name: str, value: str, collection_id: str | None,
+                      organization_id: str | None) -> tuple[bool, str]:
+    """Create a Vaultwarden Secure Note item via bw CLI. Returns (ok, msg)."""
+    item = {
+        "type": 2,  # 2 = secureNote
+        "name": name,
+        "secureNote": {"type": 0},
+        "notes": value,
+        "fields": [{"name": name, "value": value, "type": 1}],  # type 1 = hidden
+        "collectionIds": [collection_id] if collection_id else [],
+        "organizationId": organization_id,
+    }
+    encoded = subprocess.run(
+        ["bw", "encode"], input=json.dumps(item), capture_output=True, text=True, timeout=10,
+    )
+    if encoded.returncode != 0:
+        return False, f"bw encode failed: {encoded.stderr.strip()[:120]}"
+    create = subprocess.run(
+        ["bw", "create", "item", encoded.stdout.strip()],
+        capture_output=True, text=True, timeout=15,
+        env={**os.environ, "BW_SESSION": session},
+    )
+    if create.returncode != 0:
+        return False, f"bw create failed: {create.stderr.strip()[:120]}"
+    try:
+        created = json.loads(create.stdout)
+        return True, f"id={created.get('id', '?')}"
+    except json.JSONDecodeError:
+        return False, f"bw returned non-JSON: {create.stdout[:80]}"
+
+
+def cmd_migrate(args):
+    """Migrate disk-only secrets to Vaultwarden.
+
+    Flow:
+      1. Reuse cmd_discover logic to find candidate .env files + classified secrets.
+      2. For each candidate: prompt confirmation (unless --yes).
+      3. Create a Secure Note item in Vaultwarden via bw CLI (requires BW_SESSION).
+      4. Backup the original .env to .env.pre-socialwarden-<STAMP> (NEVER overwrite an existing backup).
+      5. Print summary + manual next-steps for operator (compose env_file change is intentionally manual).
+
+    Safety:
+      - Without --apply, shows discover output (dry-run, no side effects).
+      - Per-file confirmation by default; --yes for non-interactive.
+      - Backups always created before any state-touching action; never overwritten.
+      - bw session via BW_SESSION env var ONLY (never reads agent's master.key).
+    """
+    if not args.apply:
+        print(f"{BOLD}=== SocialWarden Migrate (DRY-RUN) ==={NC}\n")
+        print("This is a dry-run. Shows what would be migrated.")
+        print(f"To actually migrate, add {BOLD}--apply{NC}.\n")
+        cmd_discover(None)
+        return
+
+    # ---- prereqs ----
+    session = os.environ.get("BW_SESSION", "").strip()
+    if not session:
+        err("BW_SESSION not set. Run first:")
+        err(f"  {BOLD}export BW_SESSION=$(bw unlock --raw){NC}")
+        err("  ...then re-run with --apply.")
+        sys.exit(2)
+    if not args.collection:
+        err(f"--collection <ID> required (target Vaultwarden collection ID).")
+        err(f"List yours: {BOLD}bw list collections{NC}")
+        sys.exit(2)
+
+    org_id = args.organization
+    if not org_id:
+        # Fall back to the org id in /etc/socialwarden/config.yaml
+        try:
+            import yaml as _yaml
+            with open(CONFIG_PATH) as f:
+                cfg = _yaml.safe_load(f) or {}
+            org_id = (cfg.get("organization") or {}).get("id")
+        except Exception:
+            org_id = None
+
+    # Validate session is alive
+    status = subprocess.run(["bw", "status"], capture_output=True, text=True, timeout=10,
+                            env={**os.environ, "BW_SESSION": session})
+    if status.returncode != 0 or '"unlocked"' not in status.stdout:
+        err(f"bw session not unlocked. Re-run: export BW_SESSION=$(bw unlock --raw)")
+        sys.exit(2)
+    info("bw session OK (unlocked)")
+
+    # ---- find candidates (mirror cmd_discover) ----
+    env_files = _find_env_files()
+    synced_keys = _vault_keys_from_synced()
+    candidates: list[tuple[Path, list[tuple[str, str, list[str]]]]] = []
+    for env_path in env_files:
+        kv = _extract_env(env_path)
+        secrets = []
+        for k, v in kv:
+            if k in synced_keys:
+                continue
+            tags = _classify(k, v)
+            if "secret" in tags or "high-entropy" in tags:
+                secrets.append((k, v, tags))
+        if secrets:
+            candidates.append((env_path, secrets))
+
+    if not candidates:
+        info("Nothing to migrate. Discover finds no un-migrated secret candidates.")
+        return
+
+    # ---- per-file confirmation + actual migration ----
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    summary: list[tuple[str, str, str]] = []  # (file, key, status)
+
+    for env_path, secrets in candidates:
+        print(f"\n{BOLD}=== {env_path} ({len(secrets)} candidate(s)) ==={NC}")
+        for k, v, tags in secrets:
+            print(f"  {k:<30} (len={len(v)}, tags={','.join(tags)})")
+        if not args.yes:
+            try:
+                ans = input(f"  Migrate ALL {len(secrets)} from this file? [y/N] ").strip().lower()
+            except EOFError:
+                ans = ""
+            if ans != "y":
+                for k, _, _ in secrets:
+                    summary.append((env_path.name, k, "skipped"))
+                continue
+
+        # Backup the env file (atomic, never overwrite existing)
+        backup = env_path.with_suffix(env_path.suffix + f".pre-socialwarden-{stamp}")
+        if backup.exists():
+            warn(f"Backup {backup} already exists — skipping migration of this file.")
+            for k, _, _ in secrets:
+                summary.append((env_path.name, k, "skipped: backup exists"))
+            continue
+        try:
+            backup.write_bytes(env_path.read_bytes())
+            os.chmod(backup, 0o600)
+            info(f"  Backup: {backup}")
+        except OSError as e:
+            err(f"  Backup failed for {env_path}: {e}")
+            for k, _, _ in secrets:
+                summary.append((env_path.name, k, f"backup-fail: {e}"))
+            continue
+
+        # Create vault items
+        for k, v, _ in secrets:
+            ok, msg = _bw_create_login(session, k, v, args.collection, org_id)
+            if ok:
+                info(f"    {k}: created ({msg})")
+                summary.append((env_path.name, k, "ok"))
+            else:
+                err(f"    {k}: FAIL — {msg}")
+                summary.append((env_path.name, k, f"fail: {msg}"))
+
+    # ---- summary ----
+    ok_count = sum(1 for _, _, s in summary if s == "ok")
+    fail_count = sum(1 for _, _, s in summary if s.startswith("fail"))
+    skip_count = sum(1 for _, _, s in summary if s.startswith("skip"))
+
+    print(f"\n{BOLD}=== Migration Summary ==={NC}")
+    print(f"  ok:      {ok_count}")
+    print(f"  failed:  {fail_count}")
+    print(f"  skipped: {skip_count}")
+    print()
+    print(f"  {DIM}detail:{NC}")
+    for f, k, s in summary:
+        color = GREEN if s == "ok" else (YELLOW if s.startswith("skip") else RED)
+        print(f"    {f:<30} {k:<30} {color}{s}{NC}")
+
+    print(f"\n{BOLD}NEXT STEPS (manual):{NC}")
+    print(f"  1. {BOLD}bw sync{NC}                                          # refresh CLI cache")
+    print(f"  2. Edit /etc/socialwarden/config.yaml to subscribe this machine")
+    print(f"     to the collection containing the new items.")
+    print(f"  3. {BOLD}sudo systemctl restart socialwarden-agent{NC}           # pull from vault")
+    print(f"  4. Update your compose.yaml env_file to point at /run/secrets/<col>.env")
+    print(f"  5. {BOLD}docker compose up -d{NC}                              # apps pick up new secrets")
+    print(f"  6. After validation, remove the old .env (keep .pre-socialwarden-{stamp} backup)")
+
+    sys.exit(0 if fail_count == 0 else 4)
+
+
+# ---------------------------------------------------------------------------
+# audit — tail audit log
+# ---------------------------------------------------------------------------
+def cmd_audit(args):
+    n = args.n or 20
+    try:
+        lines = open(AUDIT_LOG).readlines()
+    except FileNotFoundError:
+        err(f"No audit log at {AUDIT_LOG} (UDS API may be disabled)")
+        sys.exit(1)
+    except PermissionError:
+        err(f"Audit log not readable (run with sudo)")
+        sys.exit(2)
+    for line in lines[-n:]:
+        try:
+            entry = json.loads(line)
+            ts = entry.get("ts", "")[:19]
+            c = entry.get("container", "?")
+            s = entry.get("secret", "?")
+            d = entry.get("decision", "?")
+            color = GREEN if d == "ok" else (YELLOW if d == "rate_limited" else RED)
+            print(f"{ts}  {color}{d:<12}{NC}  {c:<30}  {s}")
+        except json.JSONDecodeError:
+            continue
+
+
+# ---------------------------------------------------------------------------
+# versions / rollback (compatibility with old `socialwarden` CLI)
+# ---------------------------------------------------------------------------
+def cmd_versions(args):
+    vdir = Path(VERSIONS_DIR)
+    if not vdir.is_dir():
+        err(f"No versions directory at {VERSIONS_DIR}")
+        return
+    try:
+        files = sorted(vdir.glob("*.env"))
+    except PermissionError:
+        err("Cannot list versions dir (run with sudo)")
+        return
+    if args.collection:
+        files = [f for f in files if f.name.endswith(f"_{args.collection}.env")]
+    for f in files:
+        print(f.name)
+
+
+def cmd_rollback(args):
+    vfile = Path(VERSIONS_DIR) / f"{args.timestamp}_{args.collection}.env"
+    if not vfile.exists():
+        err(f"No snapshot at {vfile}")
+        sys.exit(1)
+    target = f"/run/secrets/{args.collection}.env"
+    try:
+        data = vfile.read_text()
+    except PermissionError:
+        err("Cannot read snapshot (run with sudo)")
+        sys.exit(2)
+    print(f"Would write {len(data)} bytes to {target}")
+    print("Rollback currently requires manual confirmation. Run:")
+    print(f"  sudo cp {vfile} {target}")
+    print(f"  sudo systemctl reload socialwarden-agent  # force re-sync")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: render  (decrypt age bundle → /run/secrets/<bundle>.env)
+# ---------------------------------------------------------------------------
+BUNDLES_DIR    = "/var/lib/socialwarden/bundles"
+AGE_KEY_PATH   = "/var/lib/socialwarden/age.key"
+
+
+def _require_root():
+    if os.geteuid() != 0:
+        err("This command must run as root (sudo socialwarden-agent ...)")
+        sys.exit(2)
+
+
+def _render_one(bundle: str) -> tuple[bool, str]:
+    """Decrypt /var/lib/socialwarden/bundles/<bundle>.age into /run/secrets/<bundle>.env.
+
+    Returns (ok, message). The output file is written atomically (tmp+rename)
+    with mode 0600 owned by root.
+    """
+    if not all(c.isalnum() or c in "-_" for c in bundle) or not bundle:
+        return False, f"invalid bundle name {bundle!r}"
+
+    src = Path(BUNDLES_DIR) / f"{bundle}.age"
+    if not src.exists():
+        return False, f"bundle not found: {src}"
+    if not Path(AGE_KEY_PATH).exists():
+        return False, f"age private key missing: {AGE_KEY_PATH}"
+
+    out_dir = Path(SECRETS_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    final = out_dir / f"{bundle}.env"
+    tmp = out_dir / f".{bundle}.env.tmp"
+
+    r = subprocess.run(
+        ["age", "--decrypt", "-i", AGE_KEY_PATH, "-o", str(tmp), str(src)],
+        capture_output=True, text=True, timeout=20,
+    )
+    if r.returncode != 0:
+        try: tmp.unlink()
+        except FileNotFoundError: pass
+        return False, f"age decrypt failed: {r.stderr.strip()}"
+
+    os.chmod(tmp, 0o600)
+    os.chown(tmp, 0, 0)  # root:root
+    os.replace(tmp, final)
+    return True, f"{final} ({final.stat().st_size} bytes)"
+
+
+def cmd_render(args):
+    _require_root()
+    ok, msg = _render_one(args.bundle)
+    if ok:
+        info(f"Rendered: {msg}")
+    else:
+        err(msg)
+        sys.exit(1)
+
+
+def cmd_render_all(_args):
+    _require_root()
+    bdir = Path(BUNDLES_DIR)
+    if not bdir.exists():
+        warn(f"No bundles dir at {bdir} — nothing to render")
+        return
+    bundles = sorted(p.stem for p in bdir.glob("*.age"))
+    if not bundles:
+        warn(f"No bundles in {bdir}")
+        return
+    failures = 0
+    for b in bundles:
+        ok, msg = _render_one(b)
+        if ok:
+            info(f"{b}: {msg}")
+        else:
+            err(f"{b}: {msg}")
+            failures += 1
+    if failures:
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(
+        prog="socialwarden-agent",
+        description="SocialWarden agent — client CLI.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("status", help="health + metrics + version")
+    sub.add_parser("version", help="agent version + manager reachability")
+    sub.add_parser("identity", help="show this machine's ed25519 public identity")
+    p_pt = sub.add_parser("peer-test", help="test share-release endpoint against a peer (by IP)")
+    p_pt.add_argument("peer", help="peer tailscale IP (e.g., 10.20.0.11)")
+    sub.add_parser("sync", help="force sync now (SIGHUP)")
+    p_logs = sub.add_parser("logs", help="tail journalctl")
+    p_logs.add_argument("-n", type=int, default=40)
+    sub.add_parser("doctor", help="sanity checks")
+    sub.add_parser("discover", help="scan for un-migrated .env files")
+    p_migrate = sub.add_parser("migrate", help="migrate discovered secrets to vault")
+    p_migrate.add_argument("--apply", action="store_true",
+                           help="actually perform the migration (default: dry-run)")
+    p_migrate.add_argument("--collection", default=None,
+                           help="target Vaultwarden collection ID (required with --apply)")
+    p_migrate.add_argument("--organization", default=None,
+                           help="Vaultwarden organization ID (defaults to /etc/socialwarden/config.yaml)")
+    p_migrate.add_argument("--yes", action="store_true",
+                           help="non-interactive: assume yes to per-file confirmations")
+    p_audit = sub.add_parser("audit", help="tail UDS API audit log")
+    p_audit.add_argument("-n", type=int, default=20)
+    p_versions = sub.add_parser("versions", help="list version snapshots")
+    p_versions.add_argument("collection", nargs="?")
+    p_rollback = sub.add_parser("rollback", help="rollback a collection")
+    p_rollback.add_argument("collection")
+    p_rollback.add_argument("timestamp")
+
+    p_render = sub.add_parser("render",
+        help="decrypt /var/lib/socialwarden/bundles/<bundle>.age into /run/secrets/<bundle>.env")
+    p_render.add_argument("bundle")
+    sub.add_parser("render-all",
+        help="render every *.age bundle present in /var/lib/socialwarden/bundles/")
+
+    sub.add_parser("help", help="show this help")
+
+    args = parser.parse_args()
+
+    cmds = {
+        "status":   cmd_status,
+        "version":  cmd_version,
+        "identity": cmd_identity,
+        "peer-test": cmd_peer_test,
+        "sync":     cmd_sync,
+        "logs":     cmd_logs,
+        "doctor":   cmd_doctor,
+        "discover": cmd_discover,
+        "migrate":  cmd_migrate,
+        "audit":    cmd_audit,
+        "versions":   cmd_versions,
+        "rollback":   cmd_rollback,
+        "render":     cmd_render,
+        "render-all": cmd_render_all,
+        "help":       lambda _: parser.print_help(),
+    }
+
+    cmd = cmds.get(args.command)
+    if cmd is None:
+        parser.print_help()
+        sys.exit(2)
+    cmd(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)

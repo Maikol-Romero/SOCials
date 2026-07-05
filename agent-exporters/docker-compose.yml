@@ -1,0 +1,110 @@
+# ============================================
+# Agent — Exporters + OTEL Collector
+# ============================================
+# Se despliega en cada servidor de producción.
+# Expone métricas hacia el servidor de monitorización.
+# Variables en .env
+#
+# Actualizado: 10/04/2026
+# - Exporters pineados (postgres v0.19.1, redis v1.82.0)
+# - postgres-exporter y redis-exporter en network_mode: host
+#   (bridge no alcanza IPs remotas ni localhost del host)
+# - node-exporter con textfile collector para container_up
+# - Si la máquina NO tiene Redis o PostgreSQL, comentar el exporter correspondiente
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.11.0
+    container_name: socials-node-exporter
+    pid: host
+    privileged: true
+    volumes:
+      - /:/host:ro,rslave
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro
+      - /tmp/node-exporter-textfile:/textfile:ro
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.processes'
+      - '--collector.systemd'
+      - '--collector.textfile.directory=/textfile'
+    ports:
+      - "${TAILSCALE_IP}:${NODE_EXPORTER_PORT:-9100}:9100"
+    restart: unless-stopped
+    networks:
+      - default
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    container_name: socials-cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - '--store_container_labels=true'
+      - '--housekeeping_interval=10s'
+    ports:
+      - "${TAILSCALE_IP}:${CADVISOR_PORT:-8080}:8080"
+    restart: unless-stopped
+    networks:
+      - default
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.19.1
+    container_name: socials-postgres-exporter
+    network_mode: host
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST:-127.0.0.1}:${DB_PORT:-5432}/${DB_NAME}?sslmode=disable"
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.82.0
+    container_name: socials-redis-exporter
+    network_mode: host
+    environment:
+      REDIS_ADDR: "redis://${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6379}"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    container_name: socials-otel-collector
+    user: "0"
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "${TAILSCALE_IP}:${OTEL_METRICS_PORT:-8889}:8889"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    environment:
+      - OTEL_LOG_LEVEL=warn
+    restart: unless-stopped
+    networks:
+      - socials-network
+    healthcheck:
+      disable: true
+
+  # GPU NVIDIA — descomentar en máquinas con GPU
+  # nvidia-dcgm-exporter:
+  #   image: nvidia/dcgm-exporter:3.3.5-3.4.0-ubuntu22.04
+  #   container_name: socials-nvidia-exporter
+  #   ports:
+  #     - "${TAILSCALE_IP}:${GPU_EXPORTER_PORT:-9400}:9400"
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   restart: unless-stopped
+  #   networks:
+  #     - default
+
+networks:
+  socials-network:
+    external: true
+  default:
+    name: socials-monitoring-net
+    driver: bridge

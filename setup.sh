@@ -191,10 +191,10 @@ done
 if [ ! -f "$WAZ_ENV" ]; then
     cat > "$WAZ_ENV" << ENVEOF
 MONITOR_IP=$MONITOR_IP
-INDEXER_PASSWORD=WazuhIdx-2026
+INDEXER_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 24)
 INDEXER_JAVA_OPTS="-Xms512m -Xmx512m"
 WAZUH_API_USER=wazuh-wui
-WAZUH_API_PASSWORD=wazuh-wui
+WAZUH_API_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 24)
 DISCORD_WEBHOOK_URL=${DISCORD_URL:-PENDIENTE}
 ENVEOF
     log_info "wazuh/.env creado"

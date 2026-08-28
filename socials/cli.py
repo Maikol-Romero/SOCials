@@ -8,6 +8,7 @@ Usage:
   socials deploy <name>    Deploy SOC agents to a machine
   socials generate         Generate configs from inventory.json
   socials diff             Show differences with current configs
+  socials deploy-otel [name]    Deploy OTEL configs to machines
   socials warden-enroll <name>  Enroll socialwarden agent on a machine
   socials version          Show version
 """
@@ -64,6 +65,11 @@ def cmd_diff(_args: argparse.Namespace) -> None:
     run_diff()
 
 
+def cmd_deploy_otel(args: argparse.Namespace) -> None:
+    from .generate import run_deploy_otel
+    run_deploy_otel(getattr(args, "name", None))
+
+
 def cmd_warden(args: argparse.Namespace) -> None:
     from .warden import enroll
     enroll(args.name, no_restart=args.no_restart, force=args.force)
@@ -109,6 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
     # socials diff
     p_diff = sub.add_parser("diff", help="Show config differences")
     p_diff.set_defaults(func=cmd_diff)
+
+    # socials deploy-otel [name]
+    p_otel = sub.add_parser("deploy-otel", help="Deploy OTEL configs to fleet machines")
+    p_otel.add_argument("name", nargs="?", default=None, help="Target machine (all if omitted)")
+    p_otel.set_defaults(func=cmd_deploy_otel)
 
     # socials warden-enroll <name>
     p_warden = sub.add_parser("warden-enroll", help="Enroll socialwarden agent on a machine")

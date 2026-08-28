@@ -8,6 +8,7 @@ Usage:
   socials deploy <name>    Deploy SOC agents to a machine
   socials generate         Generate configs from inventory.json
   socials diff             Show differences with current configs
+  socials warden-enroll <name>  Enroll socialwarden agent on a machine
   socials version          Show version
 """
 
@@ -63,6 +64,11 @@ def cmd_diff(_args: argparse.Namespace) -> None:
     run_diff()
 
 
+def cmd_warden(args: argparse.Namespace) -> None:
+    from .warden import enroll
+    enroll(args.name, no_restart=args.no_restart, force=args.force)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="socials",
@@ -103,6 +109,13 @@ def build_parser() -> argparse.ArgumentParser:
     # socials diff
     p_diff = sub.add_parser("diff", help="Show config differences")
     p_diff.set_defaults(func=cmd_diff)
+
+    # socials warden-enroll <name>
+    p_warden = sub.add_parser("warden-enroll", help="Enroll socialwarden agent on a machine")
+    p_warden.add_argument("name", help="Machine name from inventory")
+    p_warden.add_argument("--no-restart", action="store_true", help="Skip service restart after install")
+    p_warden.add_argument("--force", action="store_true", help="Reinstall even if same version present")
+    p_warden.set_defaults(func=cmd_warden)
 
     # socials version
     p_ver = sub.add_parser("version", help="Show version")

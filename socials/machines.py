@@ -140,7 +140,7 @@ def add_machine() -> None:
         warn("Cancelled")
         return
 
-    machines.append({
+    new_machine = {
         "name": name,
         "ip": ip,
         "role": "production",
@@ -152,8 +152,13 @@ def add_machine() -> None:
         "ram": ram,
         "gpu": gpu,
         "exporters": exporters,
-    })
-    inventory.save(machines)
+    }
+
+    def _add(machines: list[dict]) -> None:
+        machines.append(new_machine)
+
+    inventory.update(_add)
+    machines = inventory.load()
     info(f"Machine '{name}' added to inventory")
 
     deploy = ask("Deploy exporters and Wazuh agent now? (y/n): ")
@@ -191,9 +196,14 @@ def remove_machine() -> None:
         warn("Cancelled")
         return
 
-    machines = [m for m in machines if not (m["name"] == target["name"] and m["role"] == "production")]
-    inventory.save(machines)
-    info(f"Machine '{target['name']}' removed from inventory")
+    target_name = target["name"]
+
+    def _remove(machines: list[dict]) -> list[dict]:
+        return [m for m in machines if not (m["name"] == target_name and m["role"] == "production")]
+
+    inventory.update(_remove)
+    machines = inventory.load()
+    info(f"Machine '{target_name}' removed from inventory")
     _update_prometheus(machines)
 
 

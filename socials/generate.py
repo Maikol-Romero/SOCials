@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import os
+import shlex
+import subprocess
+import sys
+import tempfile
 
 from . import inventory
 from .otel import generate_collector_config
@@ -327,3 +331,91 @@ def _diff_otel(prod: list[dict]) -> None:
             info(f"OTEL {name}: filelog configured")
         else:
             warn(f"OTEL {name}: filelog NOT configured")
+
+
+def run_deploy_otel(target_name: str | None = None) -> None:
+    """Deploy updated OTEL configs to fleet machines (or a single target)."""
+    machines = inventory.load()
+    if not machines:
+        error("No inventory — nothing to deploy")
+        return
+
+    mon = inventory.monitor(machines)
+    prod = inventory.production_machines(machines)
+
+    if not prod:
+        error("No production machines in inventory")
+        return
+
+    monitor_ip = mon.get("ip", mon.get("tailscale_ip", "")) if mon else ""
+    if not monitor_ip:
+        error("Monitor IP not found in inventory")
+        return
+
+    if target_name:
+        target = inventory.find(target_name, prod)
+        if not target:
+            error(f"Machine '{target_name}' not found among production machines")
+            return
+        targets = [target]
+    else:
+        targets = prod
+
+    print(f"\n  {C.CYAN}{C.BOLD}Deploying OTEL configs{C.NC}\n")
+
+    for m in targets:
+        name = m["name"]
+        ssh_cmd = m.get("ssh", "")
+        ip = m.get("ip", m.get("tailscale_ip", ""))
+        user = m.get("user", m.get("ssh_user", "root"))
+
+        if not ssh_cmd:
+            if not ip:
+                warn(f"Skipping {name}: no SSH or IP configured")
+                continue
+            ssh_cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {user}@{ip}"
+
+        info(f"Deploying OTEL to {name}...")
+
+        config = generate_collector_config(m, monitor_ip)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", prefix=f"otel-{name}-", delete=False
+        ) as tmp:
+            tmp.write(config)
+            tmp_path = tmp.name
+
+        try:
+            home = "/root" if user == "root" else f"/home/{user}"
+            remote_path = f"{home}/socials-monitoring/otel-collector-config.yaml"
+
+            port = str(m.get("port", "22"))
+            scp_cmd = [
+                "scp", "-P", port, "-o", "ConnectTimeout=10",
+                "-o", "BatchMode=yes", tmp_path,
+                f"{user}@{ip}:{remote_path}",
+            ]
+            r = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+            if r.returncode != 0:
+                error(f"  scp failed for {name}: {r.stderr.strip()}")
+                continue
+        finally:
+            os.unlink(tmp_path)
+
+        restart_cmd = (
+            f"cd {home}/socials-monitoring && "
+            f"docker compose stop otel-collector && "
+            f"docker rm -f socials-otel-collector 2>/dev/null; "
+            f"docker compose up -d otel-collector 2>&1 | tail -2"
+        )
+        r = subprocess.run(
+            f"{ssh_cmd} {shlex.quote(restart_cmd)}",
+            shell=True, text=True, capture_output=True, timeout=120,
+        )
+        output = r.stdout.strip()
+        if "Started" in output or "started" in output.lower() or r.returncode == 0:
+            info(f"  {name}: OTEL restarted")
+        else:
+            warn(f"  {name}: {output or r.stderr.strip()}")
+
+    print()

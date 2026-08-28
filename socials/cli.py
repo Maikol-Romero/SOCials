@@ -9,6 +9,8 @@ Usage:
   socials generate         Generate configs from inventory.json
   socials diff             Show differences with current configs
   socials deploy-otel [name]    Deploy OTEL configs to machines
+  socials config [init|show|validate]  Manage central config
+  socials env-gen               Generate .env files from socials.yml
   socials warden-enroll <name>  Enroll socialwarden agent on a machine
   socials version          Show version
 """
@@ -70,6 +72,31 @@ def cmd_deploy_otel(args: argparse.Namespace) -> None:
     run_deploy_otel(getattr(args, "name", None))
 
 
+def cmd_config(args: argparse.Namespace) -> None:
+    from . import config
+    action = getattr(args, "action", "show")
+    if action == "init":
+        config.init_config()
+    elif action == "show":
+        import yaml as _yaml
+        cfg = config.load()
+        print(_yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+    elif action == "validate":
+        cfg = config.load()
+        missing = config._check_required(cfg)
+        if missing:
+            for k in missing:
+                error(f"Missing: {k}")
+        else:
+            from .utils import info as _info
+            _info("Config valid — all required keys present")
+
+
+def cmd_env_gen(args: argparse.Namespace) -> None:
+    from . import config
+    config.generate_env_files(dry_run=getattr(args, "dry_run", False))
+
+
 def cmd_warden(args: argparse.Namespace) -> None:
     from .warden import enroll
     enroll(args.name, no_restart=args.no_restart, force=args.force)
@@ -120,6 +147,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_otel = sub.add_parser("deploy-otel", help="Deploy OTEL configs to fleet machines")
     p_otel.add_argument("name", nargs="?", default=None, help="Target machine (all if omitted)")
     p_otel.set_defaults(func=cmd_deploy_otel)
+
+    # socials config [init|show|validate]
+    p_config = sub.add_parser("config", help="Manage central configuration")
+    p_config.add_argument(
+        "action", nargs="?", default="show",
+        choices=["init", "show", "validate"],
+        help="Action (default: show)",
+    )
+    p_config.set_defaults(func=cmd_config)
+
+    # socials env-gen
+    p_envgen = sub.add_parser("env-gen", help="Generate .env files from socials.yml")
+    p_envgen.add_argument("--dry-run", action="store_true", help="Show what would be written")
+    p_envgen.set_defaults(func=cmd_env_gen)
 
     # socials warden-enroll <name>
     p_warden = sub.add_parser("warden-enroll", help="Enroll socialwarden agent on a machine")

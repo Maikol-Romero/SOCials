@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 from . import inventory
-from .utils import C, bold, error, info, warn, ask, run, read_env, env_path, project_root
+from .utils import C, bold, error, info, warn, ask, run, project_root
 
 
 AGENT_DIR = os.path.join(project_root(), "agent")
@@ -219,8 +219,8 @@ def deploy_to_machine(name: str) -> None:
 
     ssh_cmd = target["ssh"]
     ip = target.get("ip", "")
-    ef = env_path()
-    monitor_ip = read_env(ef, "MONITOR_IP", "")
+    from . import config
+    monitor_ip = config.get("monitor.ip", "")
 
     if not monitor_ip:
         mon = inventory.monitor(machines)

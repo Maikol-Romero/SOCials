@@ -6,8 +6,8 @@ import json
 import urllib.request
 import urllib.error
 
-from .utils import C, bold, run, read_env, env_path, project_root
-from . import inventory
+from .utils import C, bold, run, project_root
+from . import config, inventory
 
 
 def show_status() -> None:
@@ -67,8 +67,7 @@ def _show_monitor_services() -> None:
 def _show_prometheus_targets() -> None:
     print(f"\n  {C.CYAN}{C.BOLD}PROMETHEUS TARGETS{C.NC}\n")
 
-    ef = env_path()
-    gf_ip = read_env(ef, "MONITOR_IP", "127.0.0.1")
+    gf_ip = config.get("monitor.ip", "127.0.0.1")
     try:
         req = urllib.request.Request(f"http://{gf_ip}:9090/api/v1/targets")
         res = urllib.request.urlopen(req, timeout=5)
@@ -98,7 +97,6 @@ def _show_machines() -> None:
         print(f"    {C.YELLOW}No inventory.json found{C.NC}")
         return
 
-    ef = env_path()
     for m in machines:
         name = m.get("name", "?")
         ip = m.get("ip", "?")
@@ -130,11 +128,10 @@ def _show_machines() -> None:
 def _show_alerts() -> None:
     print(f"\n  {C.CYAN}{C.BOLD}ALERTS{C.NC}\n")
 
-    ef = env_path()
-    gf_ip = read_env(ef, "MONITOR_IP", "127.0.0.1")
-    gf_user = read_env(ef, "GF_ADMIN_USER", "admin")
-    gf_pass = read_env(ef, "GF_ADMIN_PASSWORD", "admin")
-    gf_port = read_env(ef, "GF_HTTP_PORT", "3001")
+    gf_ip = config.get("monitor.ip", "127.0.0.1")
+    gf_user = config.get("grafana.user", "admin")
+    gf_pass = config.get("grafana.password", "admin")
+    gf_port = config.get("grafana.port", "3001")
 
     import base64
     auth = base64.b64encode(f"{gf_user}:{gf_pass}".encode()).decode()
@@ -204,9 +201,8 @@ def _show_trivy() -> None:
 
 
 def _show_access_urls() -> None:
-    ef = env_path()
-    gf_ip = read_env(ef, "MONITOR_IP", "127.0.0.1")
-    gf_port = read_env(ef, "GF_HTTP_PORT", "3001")
+    gf_ip = config.get("monitor.ip", "127.0.0.1")
+    gf_port = config.get("grafana.port", "3001")
 
     print(f"\n  {C.CYAN}{C.BOLD}ACCESS URLS{C.NC}\n")
     print(f"    Homepage:   http://{gf_ip}:8082")

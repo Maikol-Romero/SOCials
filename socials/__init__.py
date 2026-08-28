@@ -1,0 +1,3 @@
+"""SOCials — Self-hosted SOC + observability stack."""
+
+__version__ = "2.0.0-alpha.1"

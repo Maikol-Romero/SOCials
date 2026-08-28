@@ -308,21 +308,6 @@ exporters:
       insecure: true
   otlphttp/loki:
     endpoint: "http://{monitor_ip}:3100/otlp"
-
-# Turn Detector GPU targets (si el puerto está configurado en inventory)
-for m in inv.get("machines", []):
-    if m.get("ports", {}).get("turn_detector"):
-        ip = m["tailscale_ip"]
-        port = m["ports"]["turn_detector"]
-        name = m["name"]
-        targets.append(f"""
-  - job_name: "{name}_turn-detector"
-    static_configs:
-      - targets: ["{ip}:{port}"]
-        labels:
-          instance: "{name}"
-          layer: "ai"
-    metrics_path: /metrics""")
     tls:
       insecure: true
   prometheus:

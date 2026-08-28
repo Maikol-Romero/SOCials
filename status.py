@@ -30,7 +30,7 @@ def run(cmd, timeout=10):
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.stdout.strip()
-    except:
+    except (subprocess.TimeoutExpired, OSError):
         return ""
 
 def check_url(url, timeout=5):
@@ -38,7 +38,7 @@ def check_url(url, timeout=5):
         req = urllib.request.Request(url)
         urllib.request.urlopen(req, timeout=timeout)
         return True
-    except:
+    except (urllib.error.URLError, OSError):
         return False
 
 def main():
@@ -114,7 +114,7 @@ def main():
             print(f"    {icon} {job:25s} {instance:15s} {health}")
 
         print(f"\n    Total: {C.GREEN}{up_count} UP{C.NC}, {C.RED}{down_count} DOWN{C.NC}")
-    except:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
         print(f"    {C.RED}No se puede conectar a Prometheus{C.NC}")
 
     # ========== MÁQUINAS ==========
@@ -193,11 +193,11 @@ def main():
             res2 = urllib.request.urlopen(req2, timeout=5)
             active = json.loads(res2.read())
             firing = len([a for a in active if a.get('status', {}).get('state') == 'active'])
-        except:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
             firing = 0
 
         print(f"\n    Total: {len(alerts)} alertas configuradas, {C.RED}{firing} disparadas{C.NC}")
-    except:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
         print(f"    {C.RED}No se puede conectar a Grafana{C.NC}")
 
     # ========== WAZUH ==========
@@ -211,7 +211,7 @@ def main():
         try:
             agents_output = run("docker exec soc-wazuh-manager /var/ossec/bin/agent_control -l 2>/dev/null | grep -c 'ID:'")
             print(f"    Agentes registrados: {agents_output}")
-        except:
+        except (ValueError, OSError):
             print(f"    Agentes: {C.DIM}no disponible{C.NC}")
     else:
         print(f"    {C.RED}●{C.NC} Manager: {wazuh_healthy or 'no encontrado'}")

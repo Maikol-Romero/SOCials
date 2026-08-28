@@ -28,7 +28,7 @@ def run(cmd, timeout=30):
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.stdout.strip() if r.returncode == 0 else ""
-    except:
+    except (subprocess.TimeoutExpired, OSError):
         return ""
 
 
